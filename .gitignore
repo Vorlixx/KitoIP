@@ -1,0 +1,30 @@
+# ------------------------------------------------------------------
+#  Runtime / user data  (never commit personal or stateful files)
+# ------------------------------------------------------------------
+proxies.txt
+proxies_best.txt
+proxies_ok.json
+proxy_state.json
+kito_settings.json
+last_state.json
+
+# Logs
+*.log
+
+# Secrets / account material (WireGuard & WARP keys)
+warp-account.json
+wgconf/
+
+# Backups and old versions
+backup/
+
+# ------------------------------------------------------------------
+#  Generic OS / editor noise
+# ------------------------------------------------------------------
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/

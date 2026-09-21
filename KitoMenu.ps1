@@ -1,21 +1,21 @@
 <#
     ============================================================
-      KitoMenu  -  TEK TERMINAL, BIRLESIK MENU  (v6)
+      KitoMenu  -  SINGLE TERMINAL, UNIFIED MENU  (v6)
     ============================================================
-      Tum isler BU pencereden yapilir; ayri ayri .bat dosyalari
-      YOKTUR. KitoIP.bat sadece bu menuyu baslatir.
+      Everything is done FROM THIS WINDOW; there are NO separate
+      .bat files. KitoIP.bat only launches this menu.
 
-      Icerik:
-        * Animasyonlu acilis ekrani (logo + yazma efekti + spinner)
-        * Proxy ile Yabanci IP  (KitoVPN.ps1 -Mode Foreign)
-        * En Hizli Baglan       (KitoVPN.ps1 -Mode Fast)
-        * Proxy Avi             (KitoVPN.ps1 -Mode Hunt)
-        * Proxy Listesi         (KitoVPN.ps1 -Mode List)
-        * Ulke Secimi           (Random / ALL / DE,NL,US ...)
-        * Proxy Kapat / Durum
-        * 100.000+ proxy icin dosyadan toplu ekleme
-        * LAN IP Degistir       (KitoIP.ps1)
-        * WireGuard WARP VPN    (KitoWG.ps1)
+      Contents:
+        * Animated splash screen (logo + typewriter effect + spinner)
+        * Foreign IP via proxy   (KitoVPN.ps1 -Mode Foreign)
+        * Fastest Connect        (KitoVPN.ps1 -Mode Fast)
+        * Proxy Hunt             (KitoVPN.ps1 -Mode Hunt)
+        * Proxy List             (KitoVPN.ps1 -Mode List)
+        * Country Selection      (Random / ALL / DE,NL,US ...)
+        * Proxy Off / Status
+        * Bulk import from file for 100,000+ proxies
+        * Change LAN IP          (KitoIP.ps1)
+        * WireGuard WARP VPN     (KitoWG.ps1)
     ============================================================
 #>
 
@@ -38,16 +38,16 @@ $IpScript     = Join-Path $ScriptDir 'KitoIP.ps1'
 $WgScript     = Join-Path $ScriptDir 'KitoWG.ps1'
 $CoreScript   = Join-Path $ScriptDir 'KitoCore.ps1'
 
-# Write-FixedLine (tek satirlik ekran ciziminde kullanilir) burada tanimli
+# Write-FixedLine (used for single-line screen drawing) is defined here
 try { . $CoreScript } catch {}
 
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
-try { (Get-Host).UI.RawUI.WindowTitle = 'KitoIP  -  Proxy + IP Araci' } catch {}
+try { (Get-Host).UI.RawUI.WindowTitle = 'KitoIP  -  Proxy + IP Toolkit' } catch {}
 
 $script:poolCache = $null
 
 # ==================================================================
-#  Ayarlar (ulke secimi hatirlanir)
+#  Settings (country selection is remembered)
 # ==================================================================
 function Get-Settings {
     $d = [pscustomobject]@{ Country = 'Random'; SpeedTest = $false }
@@ -66,7 +66,7 @@ function Save-Settings {
 }
 
 # ==================================================================
-#  Animasyonlar
+#  Animations
 # ==================================================================
 function Write-Type {
     param([string]$Text, [string]$Color = 'Gray', [int]$DelayMs = 12)
@@ -82,7 +82,7 @@ function Show-Splash {
     try { $w = [Math]::Max(60, [Console]::WindowWidth) } catch { $w = 78 }
     $barW = [Math]::Min(64, $w - 4)
 
-    # ---- ust cerceve (kutu cizim karakterleri) --------------------------
+    # ---- top frame (box-drawing characters) ----------------------------
     Write-Host ''
     Write-Host ('   +' + ('=' * $barW) + '+') -ForegroundColor DarkMagenta
 
@@ -100,16 +100,16 @@ function Show-Splash {
         Start-Sleep -Milliseconds 35
     }
 
-    $sub1 = 'Proxy + IP Araci  -  v6'
-    $sub2 = 'Takilmayan tarama motoru: C# thread havuzu'
+    $sub1 = 'Proxy + IP Toolkit  -  v6'
+    $sub2 = 'Hang-free scan engine: C# thread pool'
     Write-Host ('   |' + $sub1.PadLeft([int](($barW + $sub1.Length) / 2)).PadRight($barW) + '|') -ForegroundColor Cyan
     Write-Host ('   |' + $sub2.PadLeft([int](($barW + $sub2.Length) / 2)).PadRight($barW) + '|') -ForegroundColor DarkGray
     Write-Host ('   +' + ('=' * $barW) + '+') -ForegroundColor DarkMagenta
     Write-Host ''
 
-    # ---- TEK SATIRLIK hazirlik animasyonu (asla alt satira tasmaz) ------
+    # ---- SINGLE-LINE preparation animation (never wraps) ---------------
     $spin = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
-    $steps = @('sistem taniniyor', 'onbellek okunuyor', 'motor hazirlaniyor', 'menu aciliyor')
+    $steps = @('detecting system', 'reading cache', 'preparing engine', 'opening menu')
     try {
         Write-Host ''
         $row = [Console]::CursorTop - 1
@@ -122,15 +122,15 @@ function Show-Splash {
                 Start-Sleep -Milliseconds 45
             }
         }
-        Write-FixedLine -Row $row -Text '   [OK] Hazir.' -Color Green
+        Write-FixedLine -Row $row -Text '   [OK] Ready.' -Color Green
     } catch {
-        Write-Host '   [OK] Hazir.' -ForegroundColor Green
+        Write-Host '   [OK] Ready.' -ForegroundColor Green
     }
     Start-Sleep -Milliseconds 200
 }
 
 function Wait-Key {
-    param([string]$Msg = '  Devam etmek icin ENTER tusuna bas...')
+    param([string]$Msg = '  Press ENTER to continue...')
     if ($NoPause) { return }
     Write-Host ''
     Write-Host $Msg -ForegroundColor DarkGray -NoNewline
@@ -138,7 +138,7 @@ function Wait-Key {
 }
 
 # ==================================================================
-#  Havuz bilgisi (100.000+ satir icin hizli sayim)
+#  Pool info (fast counting for 100,000+ lines)
 # ==================================================================
 function Get-PoolCount {
     if (-not (Test-Path $LocalFile)) { return 0 }
@@ -168,12 +168,12 @@ function Get-LineCount {
 }
 
 # ==================================================================
-#  Alt script calistirici (AYNI pencerede)
+#  Child script runner (SAME window)
 # ==================================================================
 function Invoke-KitoChild {
     param([string]$Script, [string[]]$ExtraArgs)
     if (-not (Test-Path $Script)) {
-        Write-Host ("  HATA: {0} bulunamadi." -f (Split-Path -Leaf $Script)) -ForegroundColor Red
+        Write-Host ("  ERROR: {0} not found." -f (Split-Path -Leaf $Script)) -ForegroundColor Red
         return
     }
     $all = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$Script) + @($ExtraArgs)
@@ -184,7 +184,7 @@ function Invoke-KitoChild {
 }
 
 # ==================================================================
-#  Proxy ekleme (dosyadan, 100k destekli)
+#  Add proxies (from file, supports 100k)
 # ==================================================================
 function Read-EndpointsFrom {
     param([string]$Path)
@@ -204,17 +204,17 @@ function Read-EndpointsFrom {
 
 function Add-ProxiesFromFile {
     Write-Host ''
-    Write-Host '  Proxy listesi ekle' -ForegroundColor Cyan
-    Write-Host '  Dosya yolunu yazip ENTER (veya pencereye surukleyip birak).' -ForegroundColor DarkGray
-    Write-Host '  Kabul edilen bicimler: ip:port  |  ip:port:user:pass  |  http://ip:port' -ForegroundColor DarkGray
-    Write-Host '  Ornek: C:\proxies\buyuk_liste.txt' -ForegroundColor DarkGray
+    Write-Host '  Add proxy list' -ForegroundColor Cyan
+    Write-Host '  Type the file path and press ENTER (or drag and drop it here).' -ForegroundColor DarkGray
+    Write-Host '  Accepted formats: ip:port  |  ip:port:user:pass  |  http://ip:port' -ForegroundColor DarkGray
+    Write-Host '  Example: C:\proxies\big_list.txt' -ForegroundColor DarkGray
     Write-Host ''
-    Write-Host '  Yol > ' -ForegroundColor Yellow -NoNewline
+    Write-Host '  Path > ' -ForegroundColor Yellow -NoNewline
     $src = [Console]::ReadLine()
     if (-not $src) { return }
     $src = $src.Trim().Trim('"').Trim("'")
     if (-not (Test-Path $src)) {
-        Write-Host ("  HATA: dosya bulunamadi -> {0}" -f $src) -ForegroundColor Red
+        Write-Host ("  ERROR: file not found -> {0}" -f $src) -ForegroundColor Red
         return
     }
 
@@ -224,31 +224,31 @@ function Add-ProxiesFromFile {
     foreach ($p in $add) { [void]$set.Add($p) }
     $newCount = $set.Count
 
-    Write-Host ("  Kaynakta {0} proxy bulundu, {1} yeni eklendi." -f $add.Count, ($newCount - $before)) -ForegroundColor Green
-    Write-Host ("  Toplam benzersiz havuz: {0} proxy" -f $newCount) -ForegroundColor Green
+    Write-Host ("  Found {0} proxies in the source, {1} new ones added." -f $add.Count, ($newCount - $before)) -ForegroundColor Green
+    Write-Host ("  Total unique pool: {0} proxies" -f $newCount) -ForegroundColor Green
 
-    Write-Host '  Onbellegi de tazeleyeyim mi (onceki test sonuclari silinsin)? [e/H] ' -ForegroundColor Yellow -NoNewline
+    Write-Host '  Also refresh the cache (delete previous test results)? [y/N] ' -ForegroundColor Yellow -NoNewline
     $ans = [Console]::ReadLine()
-    if ($ans -and $ans.Trim().ToLower().StartsWith('e')) {
+    if ($ans -and $ans.Trim().ToLower().StartsWith('y')) {
         Remove-Item $CacheFile -ErrorAction SilentlyContinue
         Remove-Item $BestFile -ErrorAction SilentlyContinue
-        Write-Host '  Onbellek temizlendi.' -ForegroundColor DarkGray
+        Write-Host '  Cache cleared.' -ForegroundColor DarkGray
     }
 
-    # Buyuk listeyi diske yaz (StreamWriter ile yaz -> 100k'da cok hizli)
+    # Write the big list to disk (StreamWriter -> very fast at 100k)
     try {
         $sw = New-Object System.IO.StreamWriter($LocalFile, $false, (New-Object System.Text.UTF8Encoding($false)))
         foreach ($p in $set) { $sw.WriteLine($p) }
         $sw.Flush(); $sw.Close()
         $script:poolCache = $null
-        Write-Host ("  Kaydedildi: {0}" -f $LocalFile) -ForegroundColor Green
+        Write-Host ("  Saved: {0}" -f $LocalFile) -ForegroundColor Green
     } catch {
-        Write-Host '  HATA: yazilamadi.' -ForegroundColor Red
+        Write-Host '  ERROR: could not write.' -ForegroundColor Red
     }
 }
 
 # ==================================================================
-#  Ulke menu
+#  Country menu
 # ==================================================================
 function Show-CountryMenu {
     while ($true) {
@@ -256,25 +256,25 @@ function Show-CountryMenu {
         Clear-Host
         Write-Host ''
         Write-Host '  ============================================================' -ForegroundColor Cyan
-        Write-Host '      ULKE SECIMI' -ForegroundColor Cyan
+        Write-Host '      COUNTRY SELECTION' -ForegroundColor Cyan
         Write-Host '  ============================================================' -ForegroundColor Cyan
-        Write-Host ("      Simdiki secim: {0}" -f $s.Country) -ForegroundColor Green
+        Write-Host ("      Current selection: {0}" -f $s.Country) -ForegroundColor Green
         Write-Host ''
-        Write-Host '    [1]  Random          (kendi ulken disinda rastgele)'
-        Write-Host '    [2]  ALL             (herhangi bir ulke)'
-        Write-Host '    [3]  DE   Almanya'
-        Write-Host '    [4]  NL   Hollanda'
-        Write-Host '    [5]  US   ABD'
-        Write-Host '    [6]  GB   Ingiltere'
-        Write-Host '    [7]  FR   Fransa'
-        Write-Host '    [8]  RU   Rusya'
-        Write-Host '    [9]  SG   Singapur'
-        Write-Host '    [10] DE,NL,US       (birden fazla)'
-        Write-Host '    [0]  Geri'
+        Write-Host '    [1]  Random          (random, outside your own country)'
+        Write-Host '    [2]  ALL             (any country)'
+        Write-Host '    [3]  DE   Germany'
+        Write-Host '    [4]  NL   Netherlands'
+        Write-Host '    [5]  US   United States'
+        Write-Host '    [6]  GB   United Kingdom'
+        Write-Host '    [7]  FR   France'
+        Write-Host '    [8]  RU   Russia'
+        Write-Host '    [9]  SG   Singapore'
+        Write-Host '    [10] DE,NL,US       (multiple)'
+        Write-Host '    [0]  Back'
         Write-Host ''
-        Write-Host '  Yukaridan bir numara SEC, veya istedigin ulke kodunu' -ForegroundColor DarkGray
-        Write-Host '  DOGRUDAN yaz (orn: IT  veya  IT,ES,PT):' -ForegroundColor DarkGray
-        Write-Host '  Secim > ' -ForegroundColor Yellow -NoNewline
+        Write-Host '  PICK a number above, or type the country code(s) you want' -ForegroundColor DarkGray
+        Write-Host '  DIRECTLY (e.g. IT  or  IT,ES,PT):' -ForegroundColor DarkGray
+        Write-Host '  Selection > ' -ForegroundColor Yellow -NoNewline
         $c = [Console]::ReadLine()
         $t = "$c".Trim()
         switch ($t) {
@@ -291,7 +291,7 @@ function Show-CountryMenu {
             '0'  { return }
             ''   { return }
             default {
-                # Sayi degil -> dogrudan yazilan ulke kodu/kodlari olarak kabul et
+                # Not a number -> accept it as directly typed country code(s)
                 $clean = ($t.ToUpper() -replace '[^A-Z,]', '')
                 if ($clean) { $s.Country = $clean; Save-Settings $s }
                 return
@@ -308,19 +308,19 @@ function Show-LanMenu {
         Clear-Host
         Write-Host ''
         Write-Host '  ============================================================' -ForegroundColor Cyan
-        Write-Host '      LAN IP DEGISTIR  (yerel adaptor IP adresi)' -ForegroundColor Cyan
+        Write-Host '      CHANGE LAN IP  (local adapter IP address)' -ForegroundColor Cyan
         Write-Host '  ============================================================' -ForegroundColor Cyan
-        Write-Host '      NOT: Yerel IP degistirmek PUBLIC IP yi degistirmez.' -ForegroundColor DarkGray
-        Write-Host '           Public IP icin [1]/[2] proxy secenegini kullan.' -ForegroundColor DarkGray
+        Write-Host '      NOTE: Changing the local IP does NOT change the PUBLIC IP.' -ForegroundColor DarkGray
+        Write-Host '           For the public IP, use the proxy option [1]/[2].' -ForegroundColor DarkGray
         Write-Host ''
-        Write-Host '    [1]  Auto     (akilli: DHCP yenile, olmazsa rastgele statik)'
-        Write-Host '    [2]  Renew    (sadece DHCP kirasini yenile)'
-        Write-Host '    [3]  Random   (subnet icinden rastgele statik IP)'
-        Write-Host '    [4]  Static   (elle IP ver)'
-        Write-Host '    [5]  Restore  (tekrar DHCP / otomatige don)'
-        Write-Host '    [0]  Geri'
+        Write-Host '    [1]  Auto     (smart: renew DHCP, else random static)'
+        Write-Host '    [2]  Renew    (renew the DHCP lease only)'
+        Write-Host '    [3]  Random   (random static IP from the subnet)'
+        Write-Host '    [4]  Static   (provide an IP manually)'
+        Write-Host '    [5]  Restore  (switch back to DHCP / automatic)'
+        Write-Host '    [0]  Back'
         Write-Host ''
-        Write-Host '  Secim > ' -ForegroundColor Yellow -NoNewline
+        Write-Host '  Selection > ' -ForegroundColor Yellow -NoNewline
         $c = [Console]::ReadLine()
         switch ("$c".Trim()) {
             '1' { Invoke-KitoChild $IpScript @('-Mode','Auto');    Wait-Key }
@@ -328,7 +328,7 @@ function Show-LanMenu {
             '3' { Invoke-KitoChild $IpScript @('-Mode','Random');  Wait-Key }
             '4' {
                 Write-Host ''
-                Write-Host '  Verilecek statik IP (orn 192.168.1.50) > ' -ForegroundColor Yellow -NoNewline
+                Write-Host '  Static IP to assign (e.g. 192.168.1.50) > ' -ForegroundColor Yellow -NoNewline
                 $ip = [Console]::ReadLine()
                 if ($ip) { Invoke-KitoChild $IpScript @('-Mode','Static','-StaticIP',$ip.Trim()); Wait-Key }
             }
@@ -346,20 +346,20 @@ function Show-WgMenu {
         Clear-Host
         Write-Host ''
         Write-Host '  ============================================================' -ForegroundColor Cyan
-        Write-Host '      WIREGUARD + CLOUDFLARE WARP  (ucretsiz, hesapsiz)' -ForegroundColor Cyan
+        Write-Host '      WIREGUARD + CLOUDFLARE WARP  (free, no account)' -ForegroundColor Cyan
         Write-Host '  ============================================================' -ForegroundColor Cyan
         Write-Host ''
-        Write-Host '    [1]  Baglan (Up)         - tunel ac, ulke sec'
-        Write-Host '    [2]  Kapat (Down)        - tuneli kapat'
-        Write-Host '    [3]  Durum (Status)      - aktif tunel + cikis IP'
-        Write-Host '    [4]  Kur (Install)       - WireGuard istemcisini kur'
-        Write-Host '    [5]  Hesap (Register)    - ucretsiz WARP hesabi olustur'
+        Write-Host '    [1]  Connect (Up)        - open the tunnel, pick a country'
+        Write-Host '    [2]  Disconnect (Down)   - close the tunnel'
+        Write-Host '    [3]  Status              - active tunnel + exit IP'
+        Write-Host '    [4]  Install             - install the WireGuard client'
+        Write-Host '    [5]  Register            - create a free WARP account'
         Write-Host '    [6]  Endpoint Test (Scan)'
-        Write-Host '    [7]  Sifirla (Reset)     - WARP hesabini sil, bastan basla'
-        Write-Host '    [0]  Geri'
+        Write-Host '    [7]  Reset               - delete the WARP account, start over'
+        Write-Host '    [0]  Back'
         Write-Host ''
-        Write-Host '  NOT: Up/Install/Register islemleri YONETICI izni ister.' -ForegroundColor DarkGray
-        Write-Host '  Secim > ' -ForegroundColor Yellow -NoNewline
+        Write-Host '  NOTE: Up/Install/Register require ADMINISTRATOR rights.' -ForegroundColor DarkGray
+        Write-Host '  Selection > ' -ForegroundColor Yellow -NoNewline
         $c = [Console]::ReadLine()
         $s = Get-Settings
         switch ("$c".Trim()) {
@@ -376,7 +376,7 @@ function Show-WgMenu {
 }
 
 # ==================================================================
-#  Ana menu
+#  Main menu
 # ==================================================================
 function Show-MainMenu {
     while ($true) {
@@ -384,7 +384,7 @@ function Show-MainMenu {
         $pool = Get-PoolCount
         $best = Get-LineCount $BestFile
         $cache = Get-LineCount $CacheFile
-        $stateTxt = 'yok'
+        $stateTxt = 'none'
         $stFile = Join-Path $ScriptDir 'proxy_state.json'
         if (Test-Path $stFile) {
             try {
@@ -396,29 +396,29 @@ function Show-MainMenu {
         Clear-Host
         Write-Host ''
         Write-Host '  ============================================================' -ForegroundColor Magenta
-        Write-Host '      K I T O I P     Proxy + IP Araci' -ForegroundColor Magenta
+        Write-Host '      K I T O I P     Proxy + IP Toolkit' -ForegroundColor Magenta
         Write-Host '  ============================================================' -ForegroundColor Magenta
-        Write-Host ("      Ulke secimi : {0}" -f $s.Country) -ForegroundColor Cyan
-        Write-Host ("      Havuz       : {0} proxy (proxies.txt)" -f $pool) -ForegroundColor Cyan
-        Write-Host ("      En iyi      : {0}   |   Onbellek: {1}" -f $best, $cache) -ForegroundColor DarkCyan
-        Write-Host ("      Aktif proxy : {0}" -f $stateTxt) -ForegroundColor DarkCyan
+        Write-Host ("      Country     : {0}" -f $s.Country) -ForegroundColor Cyan
+        Write-Host ("      Pool        : {0} proxies (proxies.txt)" -f $pool) -ForegroundColor Cyan
+        Write-Host ("      Best        : {0}   |   Cache: {1}" -f $best, $cache) -ForegroundColor DarkCyan
+        Write-Host ("      Active proxy: {0}" -f $stateTxt) -ForegroundColor DarkCyan
         Write-Host ''
-        Write-Host '    [1]  Yabanci IP ye Baglan   (ulke filtresi + en dusuk ms)' -ForegroundColor White
-        Write-Host '    [2]  EN HIZLI Baglan        (onbellekten, saniyeler icinde)' -ForegroundColor Green
-        Write-Host '    [3]  Proxy Avi              (en iyi listeyi bastan olustur)' -ForegroundColor White
-        Write-Host '    [4]  Proxy Listesi          (en hizli adaylari listele)' -ForegroundColor White
-        Write-Host '    [5]  Ulke Sec               (simdi: ' -NoNewline -ForegroundColor White
+        Write-Host '    [1]  Connect to a Foreign IP   (country filter + lowest ms)' -ForegroundColor White
+        Write-Host '    [2]  Fast Connect              (from cache, in seconds)' -ForegroundColor Green
+        Write-Host '    [3]  Proxy Hunt                (rebuild the best list)' -ForegroundColor White
+        Write-Host '    [4]  Proxy List                (show the fastest candidates)' -ForegroundColor White
+        Write-Host '    [5]  Select Country            (now: ' -NoNewline -ForegroundColor White
         Write-Host ($s.Country + ')') -NoNewline -ForegroundColor Yellow
         Write-Host ''
-        Write-Host '    [6]  Proxy Kapat            (normal baglantiya don)' -ForegroundColor White
-        Write-Host '    [7]  Durum' -ForegroundColor White
+        Write-Host '    [6]  Proxy Off                 (back to the normal connection)' -ForegroundColor White
+        Write-Host '    [7]  Status' -ForegroundColor White
         Write-Host ''
-        Write-Host '    [8]  LAN IP Degistir' -ForegroundColor White
+        Write-Host '    [8]  Change LAN IP' -ForegroundColor White
         Write-Host '    [9]  WireGuard WARP VPN' -ForegroundColor White
-        Write-Host '    [P]  Proxy Listesi Yonet    (dosyadan toplu ekle / onbellek sil)' -ForegroundColor White
-        Write-Host '    [0]  Cikis' -ForegroundColor White
+        Write-Host '    [P]  Manage Proxy List         (bulk import / clear cache)' -ForegroundColor White
+        Write-Host '    [0]  Exit' -ForegroundColor White
         Write-Host ''
-        Write-Host '  Secim > ' -ForegroundColor Yellow -NoNewline
+        Write-Host '  Selection > ' -ForegroundColor Yellow -NoNewline
         $c = [Console]::ReadLine()
         $sel = "$c".Trim().ToLower()
 
@@ -441,12 +441,12 @@ function Show-MainMenu {
 }
 
 # ==================================================================
-#  Baslat
+#  Start
 # ==================================================================
 if (-not $NoSplash) { Show-Splash }
 Show-MainMenu
 
 Clear-Host
 Write-Host ''
-Write-Host '  KitoIP kapatildi.' -ForegroundColor Magenta
+Write-Host '  KitoIP closed.' -ForegroundColor Magenta
 Write-Host ''

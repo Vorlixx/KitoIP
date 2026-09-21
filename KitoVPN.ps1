@@ -1,19 +1,19 @@
 <#
     ============================================================
-      KitoVPN  -  Yabanci Ulke / Public IP  (v5 - HIZLI + TAKILMAZ)
+      KitoVPN  -  Foreign Country / Public IP  (v5 - FAST + HANG-FREE)
     ============================================================
-      v5 (bu surum):
-        * Tarama artik C# thread havuzu ile yapilir -> ASLA TAKILMAZ,
-          cok daha hizli, 100.000+ proxy'ye olceklenir. (KitoCore.ps1)
-        * Yerel buyuk liste destegi: proxies.txt (istediginiz kadar satir)
-        * Ulke secimi (DE, NL, US, ... / Random / ALL)
-        * "Fast" modu: onbellek + en iyi liste uzerinden Saniyeler icinde
-          en dusuk ms'li, HTTPS tuneli ACAN proxy'yi uygular.
-        * En dusuk gecikme (ms) oncelikli secim.
+      v5 (this version):
+        * Scanning is now done with a C# thread pool -> NEVER HANGS,
+          much faster, scales to 100,000+ proxies. (KitoCore.ps1)
+        * Local big-list support: proxies.txt (as many lines as you like)
+        * Country selection (DE, NL, US, ... / Random / ALL)
+        * "Fast" mode: applies the lowest-ms proxy that opens an HTTPS
+          tunnel, in seconds, from cache + best list.
+        * Lowest latency (ms) gets priority.
 
-      Modlar: Foreign (baglan) | Fast (en hizli baglan) | Hunt (avi)
-              List | Status | Clear
-      Ulke  : Random | ALL | DE | DE,NL,US
+      Modes: Foreign (connect) | Fast (fastest connect) | Hunt (hunt)
+             List | Status | Clear
+      Country: Random | ALL | DE | DE,NL,US
     ============================================================
 #>
 
@@ -23,16 +23,16 @@ param(
     [string]$Mode         = 'Foreign',
 
     [string]$Country      = 'Random',   # Random | ALL | DE | DE,NL,US
-    [int]   $TcpTimeoutMs = 900,        # TCP on filtre zaman asimi
-    [int]   $TcpWorkers   = 768,        # TCP es zamanli is parcacigi
-    [int]   $MaxScanTcp   = 0,          # TCP taranacak maks aday (0 = HEPSI)
-    [int]   $MaxTest      = 3000,       # HTTP test edilecek maks proxy (0 = hepsi)
-    [int]   $TimeoutSec   = 4,          # HTTP zaman asimi (sn)
-    [int]   $HttpWorkers  = 256,        # HTTP es zamanli is parcacigi
-    [int]   $MaxLatencyMs = 900,        # Bu ms ustundeki proxy'ler elenir
-    [int]   $TopN         = 60,         # Hunt: kaydedilecek en iyi proxy sayisi
-    [switch]$SpeedTest,                 # Indirme hizi (KB/s) de olculsun
-    [switch]$Fresh,                     # Onbellegi yok say, taze havuz tara
+    [int]   $TcpTimeoutMs = 900,        # TCP pre-filter timeout
+    [int]   $TcpWorkers   = 768,        # TCP concurrency
+    [int]   $MaxScanTcp   = 0,          # Max candidates to TCP-scan (0 = ALL)
+    [int]   $MaxTest      = 3000,       # Max proxies to HTTP-test (0 = all)
+    [int]   $TimeoutSec   = 4,          # HTTP timeout (s)
+    [int]   $HttpWorkers  = 256,        # HTTP concurrency
+    [int]   $MaxLatencyMs = 900,        # Proxies above this ms are dropped
+    [int]   $TopN         = 60,         # Hunt: number of best proxies to save
+    [switch]$SpeedTest,                 # Also measure download speed (KB/s)
+    [switch]$Fresh,                     # Ignore cache, scan the fresh pool
     [string]$ListFile,
     [string]$BestFile,
     [switch]$DryRun,
@@ -53,7 +53,7 @@ if (-not $BestFile) { $BestFile = Join-Path $ScriptDir 'proxies_best.txt' }
 $RegPath    = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
 
 # ==================================================================
-#  Yardimcilar
+#  Helpers
 # ==================================================================
 function Update-WinINet {
     if (-not ('WinINetNative' -as [type])) {
@@ -130,7 +130,7 @@ function Test-AppliedProxy {
 }
 
 # ------------------------------------------------------------------
-#  Uzak kaynaklardan aday topla
+#  Collect candidates from remote sources
 # ------------------------------------------------------------------
 function Get-RemoteCandidates {
     param([string]$CountryFilter)
@@ -182,7 +182,7 @@ function Get-RemoteCandidates {
         foreach ($m in $mm) { [void]$found.Add($m.Value) }
     }
 
-    # geonode API (sayfali)
+    # geonode API (paginated)
     foreach ($pg in 1..3) {
         $g = "https://proxylist.geonode.com/api/proxy-list?limit=500&page=$pg&sort_by=lastChecked&sort_type=desc&protocols=http%2Chttps"
         try {
@@ -204,7 +204,7 @@ function Get-RemoteCandidates {
 }
 
 # ------------------------------------------------------------------
-#  Tum aday havuzu (yerel liste + onbellek + en iyi + uzak)
+#  Full candidate pool (local list + cache + best + remote)
 # ------------------------------------------------------------------
 function Get-AllCandidates {
     param([string]$CountryFilter, [switch]$IncludeRemote)
@@ -212,31 +212,31 @@ function Get-AllCandidates {
     $set = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $localCount = 0; $cacheCount = 0
 
-    # 1) Kullanici listesi: proxies.txt (buyuk liste, 100k+)
+    # 1) User list: proxies.txt (big list, 100k+)
     foreach ($p in (Read-ProxyList $LocalFile)) { [void]$set.Add($p); $localCount++ }
     if ($ListFile -and (Test-Path $ListFile)) {
         foreach ($p in (Read-ProxyList $ListFile)) { [void]$set.Add($p); $localCount++ }
     }
 
-    # 2) Onbellek + en iyi liste (hizli baslangic icin)
+    # 2) Cache + best list (for a fast start)
     foreach ($p in (Get-CachedProxies)) { [void]$set.Add($p); $cacheCount++ }
     if (Test-Path $BestFile) {
         foreach ($p in (Read-ProxyList $BestFile)) { [void]$set.Add($p) }
     }
 
-    # 3) Uzak kaynaklar
+    # 3) Remote sources
     if ($IncludeRemote) {
         $rem = Get-RemoteCandidates -CountryFilter $CountryFilter
         foreach ($p in $rem) { [void]$set.Add($p) }
-        Write-KLog ("  Uzak kaynaklardan {0} aday." -f @($rem).Count) 'DarkGray' $LogFile
+        Write-KLog ("  {0} candidates from remote sources." -f @($rem).Count) 'DarkGray' $LogFile
     }
 
-    Write-KLog ("  Havuz: yerel {0} + onbellek {1} -> toplam {2} benzersiz aday." -f $localCount, $cacheCount, $set.Count) 'DarkGray' $LogFile
+    Write-KLog ("  Pool: local {0} + cache {1} -> {2} unique candidates total." -f $localCount, $cacheCount, $set.Count) 'DarkGray' $LogFile
     return @($set)
 }
 
 # ------------------------------------------------------------------
-#  Secilen proxy'yi sisteme uygula (dogrulamali + retry'li)
+#  Apply the selected proxy to the system (with verification + retry)
 # ------------------------------------------------------------------
 function Apply-Proxy {
     param($Cand, [string]$BeforeIP)
@@ -268,16 +268,17 @@ function Apply-Proxy {
 }
 
 # ==================================================================
-#  Yonetici yetkisi GEREKMEZ (proxy HKCU'ya yazilir). Yine de -NoElevate
-#  verilmediyse ve yoneticiysek sorun yok; yonetici degilsek de calisir.
+#  Administrator rights are NOT required (the proxy is written to HKCU).
+#  Still, if -NoElevate was not given and we are admin there is no
+#  problem; and it also works when we are not admin.
 # ==================================================================
 
 Clear-Host
 Write-Host ''
 Write-Host '  ============================================' -ForegroundColor Magenta
-Write-Host '       K I T O V P N   -   Public IP / Ulke'  -ForegroundColor Magenta
+Write-Host '       K I T O V P N   -   Public IP / Country'  -ForegroundColor Magenta
 Write-Host '  ============================================' -ForegroundColor Magenta
-Write-KLog ("Mod={0} Ulke={1} MaxLatencyMs={2} TcpWorkers={3}" -f $Mode, $Country, $MaxLatencyMs, $TcpWorkers) 'White' $LogFile
+Write-KLog ("Mode={0} Country={1} MaxLatencyMs={2} TcpWorkers={3}" -f $Mode, $Country, $MaxLatencyMs, $TcpWorkers) 'White' $LogFile
 
 # ------------------------------------------------------------------
 #  STATUS / CLEAR
@@ -285,14 +286,14 @@ Write-KLog ("Mod={0} Ulke={1} MaxLatencyMs={2} TcpWorkers={3}" -f $Mode, $Countr
 if ($Mode -eq 'Status') {
     $cur = Get-ItemProperty -Path $RegPath
     $pub = Get-PublicGeo
-    Write-Host ("    Sistem proxy : {0}" -f $(if ($cur.ProxyEnable -eq 1) { $cur.ProxyServer } else { 'KAPALI' }))
+    Write-Host ("    System proxy : {0}" -f $(if ($cur.ProxyEnable -eq 1) { $cur.ProxyServer } else { 'OFF' }))
     if ($pub) { Write-Host ("    Public IP    : {0}  ({1} / {2})" -f $pub.IP, $pub.Country, $pub.CC) -ForegroundColor Green }
     Write-Host ''
     return
 }
 
 if ($Mode -eq 'Clear') {
-    Write-KLog 'Sistem proxy ayari kaldiriliyor...' 'Yellow' $LogFile
+    Write-KLog 'Removing system proxy setting...' 'Yellow' $LogFile
     Set-ItemProperty -Path $RegPath -Name ProxyEnable -Value 0 -Type DWord
     Remove-ItemProperty -Path $RegPath -Name ProxyServer -ErrorAction SilentlyContinue
     netsh winhttp reset proxy | Out-Null
@@ -300,35 +301,35 @@ if ($Mode -eq 'Clear') {
     Remove-Item $StateFile -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
     $pub = Get-PublicGeo
-    Write-KLog 'Proxy kaldirildi. Normal baglantiya donuldu.' 'Green' $LogFile
+    Write-KLog 'Proxy removed. Back to the normal connection.' 'Green' $LogFile
     if ($pub) { Write-KLog ("Public IP: {0}  ({1})" -f $pub.IP, $pub.Country) 'Green' $LogFile }
     Write-Host ''
     return
 }
 
 # ------------------------------------------------------------------
-#  ONCE (mevcut durum)
+#  BEFORE (current state)
 # ------------------------------------------------------------------
 $before = Get-PublicGeo
-$beforeStr = if ($before) { "$($before.IP) ($($before.Country))" } else { 'bilinmiyor' }
+$beforeStr = if ($before) { "$($before.IP) ($($before.Country))" } else { 'unknown' }
 $ownCC = if ($before) { $before.CC } else { $null }
 $beforeIP = if ($before) { $before.IP } else { $null }
-Write-KLog ("Mevcut public IP: {0}" -f $beforeStr) 'Gray' $LogFile
+Write-KLog ("Current public IP: {0}" -f $beforeStr) 'Gray' $LogFile
 
 # ------------------------------------------------------------------
-#  Aday havuzu
+#  Candidate pool
 # ------------------------------------------------------------------
-Write-KLog 'Aday havuzu hazirlaniyor...' 'Yellow' $LogFile
+Write-KLog 'Preparing candidate pool...' 'Yellow' $LogFile
 
 $includeRemote = ($Mode -ne 'Fast')
 $pool = @(Get-AllCandidates -CountryFilter $Country -IncludeRemote:$includeRemote)
 
 if ($pool.Count -eq 0) {
-    Write-KLog 'HATA: Hic proxy adayi bulunamadi. proxies.txt dosyasina ip:port ekleyin.' 'Red' $LogFile
+    Write-KLog 'ERROR: No proxy candidates found. Add ip:port entries to proxies.txt.' 'Red' $LogFile
     return
 }
 
-# Oncelik: onbellek + en iyi -> once test edilir. Taze olanlar karisik.
+# Priority: cache + best -> tested first. Fresh ones are interleaved.
 $priority = @(Get-CachedProxies)
 if (Test-Path $BestFile) { $priority += @(Read-ProxyList $BestFile) }
 $priority = @($priority | Select-Object -Unique)
@@ -336,8 +337,8 @@ $freshPool = @($pool | Where-Object { $priority -notcontains $_ })
 
 $scanLimit = $MaxScanTcp
 if ($Mode -eq 'Fast') {
-    # HIZLI mod: uzak kaynak YOK. Onbellek + en iyi once, sonra yerel havuzdan
-    # TUM dosyaya yayilmis (stride'li) bir ornek. Amac: saniyeler icinde baglanmak.
+    # FAST mode: NO remote sources. Cache + best first, then a strided sample
+    # spread across the WHOLE local pool. Goal: connect in seconds.
     $ordered = @($priority + $pool | Select-Object -Unique)
     $cap = 400
     if ($ordered.Count -gt $cap) {
@@ -352,12 +353,12 @@ if ($Mode -eq 'Fast') {
 } else {
     $testList = @($priority + $freshPool | Select-Object -Unique)
 }
-Write-KLog ("{0} aday TCP on filtresinden gecirilecek (oncelik {1}, taze {2})." -f $testList.Count, $priority.Count, [Math]::Max(0, $testList.Count - $priority.Count)) 'Yellow' $LogFile
+Write-KLog ("{0} candidates will go through the TCP pre-filter (priority {1}, fresh {2})." -f $testList.Count, $priority.Count, [Math]::Max(0, $testList.Count - $priority.Count)) 'Yellow' $LogFile
 
 # ------------------------------------------------------------------
-#  ASAMA 1: TCP on filtre
+#  STAGE 1: TCP pre-filter
 # ------------------------------------------------------------------
-# $global degerleri runspace'e tasinmaz; guvenli yol: parametre ile gonder
+# A runspace does not carry $global values; the safe way is to pass them as parameters
 [Kito]::Total = $testList.Count
 [Kito]::Done  = 0
 $tcpAlive = Invoke-KitoStage -Body {
@@ -368,14 +369,14 @@ $tcpAlive = Invoke-KitoStage -Body {
 $tcpAlive = @($tcpAlive | ForEach-Object { $_ })
 $tcpEps = @($tcpAlive | Sort-Object Latency | ForEach-Object { $_.Proxy })
 if ($tcpEps.Count -eq 0) { $tcpEps = $testList }
-Write-KLog ("TCP filtresi: {0}/{1} port acik." -f $tcpEps.Count, $testList.Count) 'DarkGray' $LogFile
+Write-KLog ("TCP filter: {0}/{1} ports open." -f $tcpEps.Count, $testList.Count) 'DarkGray' $LogFile
 
 # ------------------------------------------------------------------
-#  ASAMA 2: HTTP + HTTPS dogrulama (en fazla MaxTest)
+#  STAGE 2: HTTP + HTTPS verification (at most MaxTest)
 # ------------------------------------------------------------------
 if ($MaxTest -gt 0) { $httpList = @($tcpEps | Select-Object -First $MaxTest) } else { $httpList = @($tcpEps) }
-$verify = ($Mode -ne 'List')   # List'te HTTPS zorunlu degil
-Write-KLog ("{0} proxy HTTP/HTTPS testinden gecirilecek (es zamanli {1})..." -f $httpList.Count, $HttpWorkers) 'Yellow' $LogFile
+$verify = ($Mode -ne 'List')   # HTTPS is not required in List mode
+Write-KLog ("{0} proxies will go through HTTP/HTTPS testing (concurrency {1})..." -f $httpList.Count, $HttpWorkers) 'Yellow' $LogFile
 
 [Kito]::Total = $httpList.Count
 [Kito]::Done  = 0
@@ -386,15 +387,15 @@ $alive = Invoke-KitoStage -Body {
 $alive = @($alive)
 
 $httpsAlive = @($alive | Where-Object { $_.Https })
-Write-KLog ("{0} calisan proxy ({1} tanesi HTTPS tuneli acti)." -f $alive.Count, $httpsAlive.Count) 'Gray' $LogFile
+Write-KLog ("{0} working proxies ({1} of them opened an HTTPS tunnel)." -f $alive.Count, $httpsAlive.Count) 'Gray' $LogFile
 
 if ($alive.Count -eq 0) {
-    Write-KLog 'HATA: Test edilen proxy lerden hicbiri calismadi. Tekrar deneyin.' 'Red' $LogFile
+    Write-KLog 'ERROR: None of the tested proxies worked. Try again.' 'Red' $LogFile
     return
 }
 
 # ------------------------------------------------------------------
-#  ULKE FILTRESI
+#  COUNTRY FILTER
 # ------------------------------------------------------------------
 $base = if ($verify -and $httpsAlive.Count -gt 0) { $httpsAlive } else { $alive }
 switch ($Country.ToUpper()) {
@@ -406,50 +407,50 @@ switch ($Country.ToUpper()) {
     }
 }
 if ($filtered.Count -eq 0) {
-    Write-KLog ("Istenen ulke filtresine uyan proxy yok; tum uygun proxy'ler degerlendirilecek.") 'Yellow' $LogFile
+    Write-KLog ("No proxy matches the requested country filter; all suitable proxies will be evaluated.") 'Yellow' $LogFile
     $filtered = $base
 }
 
-# Kademeli: once HTTPS+hizli, sonra HTTPS, sonra hizli
+# Tiered: HTTPS+fast first, then HTTPS, then fast
 $t1 = @($filtered | Where-Object { $_.Https -and [int]$_.Latency -le $MaxLatencyMs })
 $t2 = @($filtered | Where-Object { $_.Https })
 $t3 = @($filtered | Where-Object { [int]$_.Latency -le $MaxLatencyMs })
-if ($t1.Count -gt 0)      { $ranked = Sort-ByQuality $t1; Write-KLog ("{0} proxy HTTPS-OK ve hizli (<={1}ms)." -f $t1.Count, $MaxLatencyMs) 'Green' $LogFile }
-elseif ($t2.Count -gt 0)  { $ranked = Sort-ByQuality $t2; Write-KLog ("HTTPS-OK {0} proxy (esik ustu de olabilir)." -f $t2.Count) 'Yellow' $LogFile }
-elseif ($t3.Count -gt 0)  { $ranked = Sort-ByQuality $t3; Write-KLog ("HTTPS-OK yok; hizli {0} proxy denenecek." -f $t3.Count) 'Yellow' $LogFile }
-else                      { $ranked = Sort-ByQuality $filtered; Write-KLog ("{0} aday denenecek." -f $filtered.Count) 'Yellow' $LogFile }
+if ($t1.Count -gt 0)      { $ranked = Sort-ByQuality $t1; Write-KLog ("{0} proxies are HTTPS-OK and fast (<={1}ms)." -f $t1.Count, $MaxLatencyMs) 'Green' $LogFile }
+elseif ($t2.Count -gt 0)  { $ranked = Sort-ByQuality $t2; Write-KLog ("HTTPS-OK {0} proxies (may exceed the threshold)." -f $t2.Count) 'Yellow' $LogFile }
+elseif ($t3.Count -gt 0)  { $ranked = Sort-ByQuality $t3; Write-KLog ("No HTTPS-OK; trying {0} fast proxies." -f $t3.Count) 'Yellow' $LogFile }
+else                      { $ranked = Sort-ByQuality $filtered; Write-KLog ("{0} candidates will be tried." -f $filtered.Count) 'Yellow' $LogFile }
 
 # ------------------------------------------------------------------
-#  LIST modu: listele ve cik
+#  LIST mode: list and exit
 # ------------------------------------------------------------------
 if ($Mode -eq 'List') {
     Write-Host ''
-    Write-Host '  En iyi proxy ler (ms''e gore sirali):' -ForegroundColor Green
+    Write-Host '  Best proxies (sorted by ms):' -ForegroundColor Green
     $ranked | Select-Object Proxy, Latency, KBps, Https, CC, Country, City -First 40 |
         Format-Table -AutoSize | Out-String | Write-Host
     return
 }
 
 # ------------------------------------------------------------------
-#  HUNT modu: en iyi TopN'u kaydet
+#  HUNT mode: save the best TopN
 # ------------------------------------------------------------------
 if ($Mode -eq 'Hunt') {
     $best = @($ranked | Select-Object -First $TopN)
     Write-Host ''
-    Write-KLog ("EN IYI {0} proxy (HTTPS dogrulanmis, en dusuk ms):" -f $best.Count) 'Green' $LogFile
+    Write-KLog ("BEST {0} proxies (HTTPS-verified, lowest ms):" -f $best.Count) 'Green' $LogFile
     $best | Select-Object Proxy, Latency, KBps, Https, CC, Country, City | Format-Table -AutoSize | Out-String | Write-Host
     $best | ForEach-Object { $_.Proxy } | Set-Content -Path $BestFile -ErrorAction SilentlyContinue
     foreach ($b in $best) { Save-CachedProxy $b }
-    Write-KLog ("Kaydedildi: {0}" -f $BestFile) 'Green' $LogFile
+    Write-KLog ("Saved: {0}" -f $BestFile) 'Green' $LogFile
     Write-Host ''
     return
 }
 
 # ------------------------------------------------------------------
-#  FOREIGN / FAST modu: uygula
+#  FOREIGN / FAST mode: apply
 # ------------------------------------------------------------------
 if ($DryRun) {
-    Write-KLog ("DryRun: secilecek en iyi aday -> {0} [{1} ms] ({2})" -f $ranked[0].Proxy, $ranked[0].Latency, $ranked[0].Country) 'Yellow' $LogFile
+    Write-KLog ("DryRun: best candidate that would be selected -> {0} [{1} ms] ({2})" -f $ranked[0].Proxy, $ranked[0].Latency, $ranked[0].Country) 'Yellow' $LogFile
     return
 }
 
@@ -459,24 +460,24 @@ foreach ($cand in $attempts) {
     Write-Host ''
     $msTxt = if ($cand.KBps) { "{0} ms / {1} KB/s" -f $cand.Latency, $cand.KBps } else { "{0} ms" -f $cand.Latency }
     $tag = if ($cand.Https) { 'HTTPS-OK' } else { 'HTTPS?' }
-    Write-KLog ("Denenen: {0}  [{1} {2}]  ({3}/{4} - {5})" -f $cand.Proxy, $msTxt, $tag, $cand.Country, $cand.CC, $cand.City) 'White' $LogFile
+    Write-KLog ("Trying: {0}  [{1} {2}]  ({3}/{4} - {5})" -f $cand.Proxy, $msTxt, $tag, $cand.Country, $cand.CC, $cand.City) 'White' $LogFile
     $res = Apply-Proxy -Cand $cand -BeforeIP $beforeIP
     if ($res.Ok) { $chosen = $cand; break }
-    Write-KLog ("  Uygulanamadi/dogrulanamadi, siradaki deneniyor..." -f $cand.Proxy) 'Yellow' $LogFile
+    Write-KLog ("  Could not apply/verify, trying the next one...") 'Yellow' $LogFile
 }
 
 Write-Host ''
-Write-Host '  ---------------- SONUC ----------------' -ForegroundColor Magenta
-Write-Host ("    ONCE : {0}" -f $beforeStr) -ForegroundColor White
+Write-Host '  ---------------- RESULT ----------------' -ForegroundColor Magenta
+Write-Host ("    BEFORE: {0}" -f $beforeStr) -ForegroundColor White
 if (-not $chosen) {
-    Write-Host '    SONRA: degismedi (uygun proxy uygulanamadi)' -ForegroundColor Yellow
-    Write-KLog 'Hicbir proxy dogrulanamadi: sistem eski haline donduruldu.' 'Red' $LogFile
+    Write-Host '    AFTER : unchanged (no suitable proxy could be applied)' -ForegroundColor Yellow
+    Write-KLog 'No proxy could be verified: the system was restored to its previous state.' 'Red' $LogFile
     Write-Host '  --------------------------------------' -ForegroundColor Magenta
     Write-Host ''
     return
 }
 
-Write-Host ("    SONRA: {0}  ({1} / {2})" -f $chosen.IP, $chosen.Country, $chosen.CC) -ForegroundColor Green
+Write-Host ("    AFTER : {0}  ({1} / {2})" -f $chosen.IP, $chosen.Country, $chosen.CC) -ForegroundColor Green
 Write-Host ("    Proxy: {0}   [{1} ms]" -f $chosen.Proxy, $chosen.Latency) -ForegroundColor Green
 Write-Host '  --------------------------------------' -ForegroundColor Magenta
 Save-CachedProxy $chosen
@@ -487,5 +488,5 @@ $state = [ordered]@{
 }
 $state | ConvertTo-Json | Set-Content -Path $StateFile -ErrorAction SilentlyContinue
 Write-Host ''
-Write-KLog 'Bitti. Kapatmak icin menu [6] Proxy Kapat.' 'DarkGray' $LogFile
+Write-KLog 'Done. To turn it off, use menu [6] Proxy Off.' 'DarkGray' $LogFile
 Write-Host ''

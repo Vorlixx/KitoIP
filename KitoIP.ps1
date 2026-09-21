@@ -1,27 +1,27 @@
 <#
     ============================================================
-      KitoIP  -  Otomatik IP Degistirici  (Windows)
+      KitoIP  -  Automatic IP Changer  (Windows)
     ============================================================
-      Baslatildiginda aktif ag adaptorunun IP adresini otomatik
-      degistirir. Uc yontem destekler:
+      When launched, it automatically changes the IP address of the
+      active network adapter. Five methods are supported:
 
-        Auto     : Akilli mod. Once DHCP kirasini yeniler (release/
-                   renew + adaptor reset). Public IP degismezse
-                   subnet icinden RASTGELE statik IP atar.
-        Renew    : Sadece DHCP kira yenileme (yeni IP almaya calisir).
-        Random   : Subnet icinden rastgele bir statik IP atar.
-        Static   : -StaticIP ile verilen IP'yi atar.
-        Restore  : Adaptoru tekrar DHCP'ye (otomatik) dondurur.
+        Auto     : Smart mode. First renews the DHCP lease (release/
+                   renew + adapter reset). If the public IP does not
+                   change, it assigns a RANDOM static IP from the subnet.
+        Renew    : DHCP lease renewal only (tries to obtain a new IP).
+        Random   : Assigns a random static IP from the subnet.
+        Static   : Assigns the IP given via -StaticIP.
+        Restore  : Switches the adapter back to DHCP (automatic).
 
-      Kullanim ornekleri:
-        KitoIP.ps1                       -> Auto mod
+      Usage examples:
+        KitoIP.ps1                       -> Auto mode
         KitoIP.ps1 -Mode Random
         KitoIP.ps1 -Mode Static -StaticIP 192.168.1.50
         KitoIP.ps1 -Mode Restore
         KitoIP.ps1 -Interface "Ethernet"
 
-      NOT: Yerel (LAN) IP degistirmek, dis dunyaya cikan PUBLIC
-      IP'yi degistirmez. Public IP icin VPN/proxy gerekir.
+      NOTE: Changing the local (LAN) IP does NOT change the PUBLIC
+      IP facing the internet. A VPN/proxy is required for that.
     ============================================================
 #>
 
@@ -30,22 +30,22 @@ param(
     [ValidateSet('Auto','Renew','Random','Static','Restore','Foreign')]
     [string]$Mode = 'Auto',
 
-    [string]$Interface,                                  # Bos ise aktif adaptor secilir
-    [string]$StaticIP,                                   # -Mode Static icin hedef IP
-    [int]$PrefixLength = 24,                             # Alt ag maskesi (24 = 255.255.255.0)
-    [string]$Gateway,                                    # Bos ise otomatik bulunur
-    [string]$Dns = '1.1.1.1,8.8.8.8',                    # Statik modda atanacak DNS
-    [string]$Country = 'Random',                         # -Mode Foreign icin ulke
-    [switch]$NoElevate                                   # Yonetici yukseltmeyi kapat
+    [string]$Interface,                                  # If empty, the active adapter is selected
+    [string]$StaticIP,                                   # Target IP for -Mode Static
+    [int]$PrefixLength = 24,                             # Subnet mask (24 = 255.255.255.0)
+    [string]$Gateway,                                    # If empty, it is detected automatically
+    [string]$Dns = '1.1.1.1,8.8.8.8',                    # DNS assigned in static mode
+    [string]$Country = 'Random',                         # Country for -Mode Foreign
+    [switch]$NoElevate                                   # Disable administrator elevation
 )
 
 # ------------------------------------------------------------------
-#  FOREIGN modu -> KitoVPN.ps1'e devret (public IP / yabanci ulke)
+#  FOREIGN mode -> delegate to KitoVPN.ps1 (public IP / foreign country)
 # ------------------------------------------------------------------
 if ($Mode -eq 'Foreign') {
     $vpnScript = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'KitoVPN.ps1'
     if (-not (Test-Path $vpnScript)) {
-        Write-Host 'HATA: KitoVPN.ps1 bulunamadi.' -ForegroundColor Red
+        Write-Host 'ERROR: KitoVPN.ps1 not found.' -ForegroundColor Red
         return
     }
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $vpnScript -Mode Foreign -Country $Country
@@ -59,7 +59,7 @@ if (-not $ScriptDir) { $ScriptDir = (Get-Location).Path }
 $LogFile   = Join-Path $ScriptDir 'kitoip.log'
 
 # ------------------------------------------------------------------
-#  Yardimci fonksiyonlar
+#  Helper functions
 # ------------------------------------------------------------------
 function Write-Log {
     param([string]$Msg, [string]$Color = 'Gray')
@@ -84,13 +84,13 @@ function ConvertTo-Mask {
 }
 
 function Get-ActiveAdapter {
-    # Varsayilan ag gecidi olan, calisan adaptoru bul
+    # Find the working adapter that has a default gateway
     $cfg = Get-NetIPConfiguration |
         Where-Object { $_.IPv4DefaultGateway -ne $null -and $_.NetAdapter.Status -eq 'Up' } |
         Select-Object -First 1
     if ($cfg) { return $cfg.InterfaceAlias }
 
-    # Bulunamazsa sabit IP'li ilk IPv4 adaptoru kullan
+    # If not found, use the first IPv4 adapter with a static IP
     $alt = Get-NetIPAddress -AddressFamily IPv4 |
         Where-Object { $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -ne '127.0.0.1' } |
         Select-Object -First 1
@@ -109,7 +109,7 @@ function Get-AdapterIPv4 {
 function Get-PublicIP {
     try {
         (Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 8).Trim()
-    } catch { return 'bilinmiyor' }
+    } catch { return 'unknown' }
 }
 
 function Save-State {
@@ -136,18 +136,18 @@ function Show-State {
     $ip = Get-AdapterIPv4 -Iface $Iface
     $gw = (Get-NetIPConfiguration -InterfaceAlias $Iface).IPv4DefaultGateway.NextHop
     $origin = if ($ip) { $ip.PrefixOrigin } else { '-' }
-    Write-Host ("    Adaptor  : {0}" -f $Iface)
-    Write-Host ("    Yerel IP : {0}/{1}  ({2})" -f `
+    Write-Host ("    Adapter  : {0}" -f $Iface)
+    Write-Host ("    Local IP : {0}/{1}  ({2})" -f `
         ($(if ($ip) {$ip.IPAddress} else {'-'})), `
         ($(if ($ip) {$ip.PrefixLength} else {'-'})), $origin)
-    Write-Host ("    Gecit    : {0}" -f ($(if ($gw) {$gw} else {'-'})))
+    Write-Host ("    Gateway  : {0}" -f ($(if ($gw) {$gw} else {'-'})))
     Write-Host ("    Public IP: {0}" -f (Get-PublicIP))
 }
 
 function Set-StaticIP {
     param([string]$Iface, [string]$IP, [int]$Prefix, [string]$Gw)
     $mask = ConvertTo-Mask -Prefix $Prefix
-    Write-Log ("Statik IP ataniyor: {0}/{1} gecit={2}" -f $IP, $Prefix, $Gw) 'Yellow'
+    Write-Log ("Assigning static IP: {0}/{1} gateway={2}" -f $IP, $Prefix, $Gw) 'Yellow'
 
     if ($Gw) {
         netsh interface ip set address name="$Iface" static $IP $mask $Gw 1 | Out-Null
@@ -165,12 +165,12 @@ function Set-StaticIP {
 
 function Renable-Adapter {
     param([string]$Iface)
-    Write-Log ("Adaptor resetleniyor: {0}" -f $Iface) 'Yellow'
+    Write-Log ("Resetting adapter: {0}" -f $Iface) 'Yellow'
     try {
         Restart-NetAdapter -Name $Iface -Confirm:$false
         Start-Sleep -Seconds 4
     } catch {
-        # Wi-Fi icin baglan/kes ile yeni kira zorla
+        # For Wi-Fi, force a new lease by disconnecting/reconnecting
         netsh interface set interface name="$Iface" admin=disabled | Out-Null
         Start-Sleep -Seconds 3
         netsh interface set interface name="$Iface" admin=enabled  | Out-Null
@@ -183,10 +183,10 @@ function Renable-Adapter {
 }
 
 # ------------------------------------------------------------------
-#  Yonetici yetkisi (gerekirse UAC ile yeniden baslat)
+#  Administrator rights (relaunch via UAC if needed)
 # ------------------------------------------------------------------
 if (-not (Test-Admin) -and -not $NoElevate) {
-    Write-Host 'Yonetici yetkisi gerekli. UAC penceresi aciliyor...' -ForegroundColor Yellow
+    Write-Host 'Administrator rights required. Opening the UAC prompt...' -ForegroundColor Yellow
     $argList = @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$($MyInvocation.MyCommand.Path)`"")
     $argList += @('-Mode', $Mode)
     if ($Interface)  { $argList += @('-Interface',  "`"$Interface`"") }
@@ -197,45 +197,45 @@ if (-not (Test-Admin) -and -not $NoElevate) {
     try {
         Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $argList
     } catch {
-        Write-Host 'Yukseltme iptal edildi. Yonetici olarak tekrar deneyin.' -ForegroundColor Red
+        Write-Host 'Elevation cancelled. Try again as administrator.' -ForegroundColor Red
     }
     return
 }
 
 # ------------------------------------------------------------------
-#  Baslik
+#  Banner
 # ------------------------------------------------------------------
 Clear-Host
 Write-Host ''
 Write-Host '  ============================================' -ForegroundColor Green
-Write-Host '          K I T O I P   -   IP Degistirici' -ForegroundColor Green
+Write-Host '          K I T O I P   -   IP Changer' -ForegroundColor Green
 Write-Host '  ============================================' -ForegroundColor Green
-Write-Log ("Baslatildi. Mod={0}" -f $Mode) 'White'
+Write-Log ("Started. Mode={0}" -f $Mode) 'White'
 
 # ------------------------------------------------------------------
-#  Adaptor secimi
+#  Adapter selection
 # ------------------------------------------------------------------
 if (-not $Interface) {
     $Interface = Get-ActiveAdapter
 }
 if (-not $Interface) {
-    Write-Log 'HATA: Aktif ag adaptoru bulunamadi.' 'Red'
+    Write-Log 'ERROR: No active network adapter found.' 'Red'
     return
 }
-Write-Log ("Kullanilan adaptor: {0}" -f $Interface) 'Gray'
+Write-Log ("Using adapter: {0}" -f $Interface) 'Gray'
 
 $beforeIP = (Get-AdapterIPv4 -Iface $Interface).IPAddress
 $beforePub = Get-PublicIP
 Save-State -Iface $Interface
-Show-State -Label 'ONCE' -Iface $Interface
+Show-State -Label 'BEFORE' -Iface $Interface
 
 # ------------------------------------------------------------------
-#  Mod islemleri
+#  Mode actions
 # ------------------------------------------------------------------
 switch ($Mode) {
 
     'Restore' {
-        Write-Log 'DHCP (otomatik) moduna donuluyor...' 'Yellow'
+        Write-Log 'Switching back to DHCP (automatic) mode...' 'Yellow'
         netsh interface ip set address name="$Interface" source=dhcp | Out-Null
         netsh interface ip set dns     name="$Interface" source=dhcp | Out-Null
         ipconfig /release  | Out-Null
@@ -245,7 +245,7 @@ switch ($Mode) {
     }
 
     'Renew' {
-        Write-Log 'DHCP kirasini yeniliyorum (release/renew + reset)...' 'Yellow'
+        Write-Log 'Renewing the DHCP lease (release/renew + reset)...' 'Yellow'
         netsh interface ip set address name="$Interface" source=dhcp | Out-Null
         netsh interface ip set dns     name="$Interface" source=dhcp | Out-Null
         Renable-Adapter -Iface $Interface
@@ -253,11 +253,11 @@ switch ($Mode) {
 
     'Random' {
         $cur = Get-AdapterIPv4 -Iface $Interface
-        if (-not $cur) { Write-Log 'HATA: Mevcut IP okunamadi, rastgele mod yapilamaz.' 'Red'; return }
+        if (-not $cur) { Write-Log 'ERROR: Current IP could not be read; random mode is unavailable.' 'Red'; return }
         $prefix = if ($PrefixLength -ne 24) { $PrefixLength } else { $cur.PrefixLength }
         $octets = $cur.IPAddress.Split('.')
         $base   = "{0}.{1}.{2}" -f $octets[0], $octets[1], $octets[2]
-        # Gecit ve mevcut IP'den farkli rastgele host sec (2-254)
+        # Pick a random host (2-254) that differs from the gateway and the current IP
         do { $host8 = Get-Random -Minimum 2 -Maximum 255 } while ("$base.$host8" -eq $cur.IPAddress)
         $newIP  = "$base.$host8"
         $gw     = if ($Gateway) { $Gateway } else { (Get-NetIPConfiguration -InterfaceAlias $Interface).IPv4DefaultGateway.NextHop }
@@ -265,13 +265,13 @@ switch ($Mode) {
     }
 
     'Static' {
-        if (-not $StaticIP) { Write-Log 'HATA: -Mode Static icin -StaticIP gerekli.' 'Red'; return }
+        if (-not $StaticIP) { Write-Log 'ERROR: -StaticIP is required for -Mode Static.' 'Red'; return }
         $gw = if ($Gateway) { $Gateway } else { (Get-NetIPConfiguration -InterfaceAlias $Interface).IPv4DefaultGateway.NextHop }
         Set-StaticIP -Iface $Interface -IP $StaticIP -Prefix $PrefixLength -Gw $gw
     }
 
     'Auto' {
-        Write-Log 'AUTO mod: once DHCP kira yenilemesi deneniyor...' 'Yellow'
+        Write-Log 'AUTO mode: trying a DHCP lease renewal first...' 'Yellow'
         netsh interface ip set address name="$Interface" source=dhcp | Out-Null
         netsh interface ip set dns     name="$Interface" source=dhcp | Out-Null
         Renable-Adapter -Iface $Interface
@@ -280,7 +280,7 @@ switch ($Mode) {
         $afterPub = Get-PublicIP
 
         if ($afterIP -eq $beforeIP -and $afterPub -eq $beforePub) {
-            Write-Log 'DHCP ile IP degismedi -> subnet icinden rastgele statik IP ataniyorum.' 'Yellow'
+            Write-Log 'IP did not change via DHCP -> assigning a random static IP from the subnet.' 'Yellow'
             $cur    = Get-AdapterIPv4 -Iface $Interface
             $octets = $cur.IPAddress.Split('.')
             $base   = "{0}.{1}.{2}" -f $octets[0], $octets[1], $octets[2]
@@ -288,25 +288,24 @@ switch ($Mode) {
             $gw = if ($Gateway) { $Gateway } else { (Get-NetIPConfiguration -InterfaceAlias $Interface).IPv4DefaultGateway.NextHop }
             Set-StaticIP -Iface $Interface -IP "$base.$host8" -Prefix $cur.PrefixLength -Gw $gw
         } else {
-            Write-Log 'DHCP kira yenilemesi sonrasi IP degisti/guncellendi.' 'Green'
+            Write-Log 'The IP changed/was updated after the DHCP lease renewal.' 'Green'
         }
     }
 }
 
 # ------------------------------------------------------------------
-#  Sonuc
+#  Result
 # ------------------------------------------------------------------
 Start-Sleep -Seconds 2
-Show-State -Label 'SONRA' -Iface $Interface
+Show-State -Label 'AFTER' -Iface $Interface
 
 $afterIP  = (Get-AdapterIPv4 -Iface $Interface).IPAddress
 $afterPub = Get-PublicIP
 Write-Host ''
-Write-Host '  ---------------- OZET ----------------' -ForegroundColor Green
-Write-Host ("    Yerel IP  : {0}  ->  {1}" -f $beforeIP, $afterIP) -ForegroundColor White
+Write-Host '  ---------------- SUMMARY ----------------' -ForegroundColor Green
+Write-Host ("    Local IP  : {0}  ->  {1}" -f $beforeIP, $afterIP) -ForegroundColor White
 Write-Host ("    Public IP : {0}  ->  {1}" -f $beforePub, $afterPub) -ForegroundColor White
 Write-Host '  --------------------------------------' -ForegroundColor Green
 Write-Host ''
-Write-Log ("Islem tamam. {0} -> {1}" -f $beforeIP, $afterIP) 'Green'
-Write-Log ("Log dosyasi: {0}" -f $LogFile) 'DarkGray'
-
+Write-Log ("Done. {0} -> {1}" -f $beforeIP, $afterIP) 'Green'
+Write-Log ("Log file: {0}" -f $LogFile) 'DarkGray'

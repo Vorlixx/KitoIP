@@ -1,24 +1,24 @@
 <#
     ============================================================
-      KitoCore  -  Ortak Motor (tarama + yardimci fonksiyonlar)
+      KitoCore  -  Shared Engine (scanning + helper functions)
     ============================================================
-      Bu dosya dogrudan calistirilmaz. KitoVPN.ps1 ve KitoMenu.ps1
-      tarafindan "dot-source" edilir.
+      This file is not run directly. It is "dot-sourced" by
+      KitoVPN.ps1 and KitoMenu.ps1.
 
-      NEDEN YENIDEN YAZILDI (v4 -> v5):
-        Eski motor HER proxy icin ayri bir PowerShell instance'i
-        yaratiyordu ve "Wait-JobsAnimated" hicbir zaman asimi (deadline)
-        olmadan TUM islerin bitmesini bekliyordu. Bir proxy takilirsa
-        bar sonsuza kadar donuyordu ("http/tc taramasi duruyor" hatasi).
-        Ayrica 100.000 proxy icin bu yontem imkansizdi.
+      WHY IT WAS REWRITTEN (v4 -> v5):
+        The old engine created a separate PowerShell instance for
+        EVERY proxy, and "Wait-JobsAnimated" waited for ALL jobs
+        to finish with no deadline: if a single proxy stopped
+        responding, the progress bar hung forever (the "http/tcp
+        scan is stuck somewhere" bug you reported).
+        That approach was also impossible for 100,000 proxies.
 
-        Yeni motor taramayi C# icinde CALISAN GERCEK IS PARCACIKLARI
-        (thread) ile yapar:
-          * Sabit sayida worker + kuyruk (ConcurrentQueue)
-          * Her islem icin kesin zaman asimi (Timeout)
-          * Her asamada sabit "son tarih" (deadline) -> ASLA TAKILMAZ
-          * 100.000+ proxy icin olceklenir ve cok daha hizli
-        Ilerleme [Kito]::Done / [Kito]::Total uzerinden okunur.
+        The new engine runs the scan inside C# using REAL THREADS:
+          * Fixed number of workers + a queue (ConcurrentQueue)
+          * A strict timeout for every operation
+          * A fixed "deadline" for every stage -> NEVER HANGS
+          * Scales to 100,000+ proxies and is much faster
+        Progress is read through [Kito]::Done / [Kito]::Total.
     ============================================================
 #>
 
@@ -49,14 +49,14 @@ public class KitoRes {
 }
 
 public class Kito {
-    // Ilerleme sayaclari (PowerShell tarafindan okunur)
+    // Progress counters (read by PowerShell)
     public static int Done = 0;
     public static int Total = 0;
 
-    // Statik (global) sertifika dogrulama atlamasi.
-    // HttpWebRequest'te "ServerCertificateValidationCallback" adinda bir
-    // property YOKTUR (derleme hatasi verirdi) - bu ayar ServicePointManager
-    // uzerinden GLOBAL olarak yapilir ve statik constructor'da bir kez kurulur.
+    // Static (global) certificate validation bypass.
+    // HttpWebRequest has NO property called "ServerCertificateValidationCallback"
+    // (it would be a compile error) - this setting is applied GLOBALLY through
+    // ServicePointManager and configured once in the static constructor.
     static Kito() {
         ServicePointManager.ServerCertificateValidationCallback = delegate { return true; };
         ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
@@ -68,7 +68,7 @@ public class Kito {
     static readonly Regex ReCo   = new Regex("\"country\"\\s*:\\s*\"([^\"]*)\"", RegexOptions.Compiled);
     static readonly Regex ReCity = new Regex("\"city\"\\s*:\\s*\"([^\"]*)\"", RegexOptions.Compiled);
 
-    // ---------------- TCP baglanti testi ----------------
+    // ---------------- TCP connectivity test ----------------
     static bool TcpConnect(string ip, int port, int timeoutMs) {
         try {
             using (var c = new TcpClient()) {
@@ -114,9 +114,9 @@ public class Kito {
         return results;
     }
 
-    // ---------------- HTTP (proxy) testi ----------------
-    // HttpWebRequest.Timeout bazi durumlarda (DNS + proxy CONNECT) uygulanmaz.
-    // Bu yuzden GERCEK sert zaman asimi: BeginGetResponse + WaitOne + Abort.
+    // ---------------- HTTP (proxy) test ----------------
+    // HttpWebRequest.Timeout is not enforced in some cases (DNS + proxy CONNECT).
+    // Therefore a TRUE hard timeout is used: BeginGetResponse + WaitOne + Abort.
     static bool HttpGetText(string proxy, string url, int timeoutMs, out string text, out int ms) {
         text = null; ms = 0;
         var sw = Stopwatch.StartNew();
@@ -181,7 +181,7 @@ public class Kito {
         bool https = false;
         string ip = null, cc = null, country = null, city = null;
 
-        // 1) HTTPS uzerinden (ipwho.is) - gercek CONNECT tuneli gerektirir
+        // 1) Over HTTPS (ipwho.is) - requires a real CONNECT tunnel
         if (HttpGetText(ep, "https://ipwho.is/", timeoutMs, out txt, out ms) && txt != null) {
             bool succ = txt.IndexOf("\"success\":true", StringComparison.OrdinalIgnoreCase) >= 0
                      || txt.IndexOf("\"success\": true", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -195,7 +195,7 @@ public class Kito {
             }
         }
 
-        // 2) Olmazsa duz HTTP uzerinden (bazi proxy'ler sadece HTTP tuneli acar)
+        // 2) Otherwise over plain HTTP (some proxies only open an HTTP tunnel)
         if (!https) {
             string t2; int ms2 = 0;
             if (!HttpGetText(ep, "http://ip-api.com/json/?fields=status,country,countryCode,city,query", timeoutMs, out t2, out ms2) || t2 == null)
@@ -209,7 +209,7 @@ public class Kito {
             ms = ms2;
         }
 
-        // Dogrulama isteniyorsa ve HTTPS tutmadiysa ele
+        // If verification is requested and HTTPS did not hold, drop it
         if (verifyHttps && !https) return;
 
         int kbps = 0;
@@ -248,7 +248,7 @@ public class Kito {
 }
 
 # ------------------------------------------------------------------
-#  Loglama
+#  Logging
 # ------------------------------------------------------------------
 function Write-KLog {
     param([string]$Msg, [string]$Color = 'Gray', [string]$LogFile)
@@ -259,7 +259,7 @@ function Write-KLog {
 }
 
 # ------------------------------------------------------------------
-#  Mevcut public IP + ulke
+#  Current public IP + country
 # ------------------------------------------------------------------
 function Get-PublicGeo {
     param([string]$Proxy)
@@ -283,7 +283,7 @@ function Get-PublicGeo {
 }
 
 # ------------------------------------------------------------------
-#  Proxy listesi dosyasini HIZLI okur (100.000+ satir destekler)
+#  Reads the proxy list file FAST (supports 100,000+ lines)
 # ------------------------------------------------------------------
 function Read-ProxyList {
     param([string]$Path)
@@ -301,14 +301,15 @@ function Read-ProxyList {
 }
 
 # ------------------------------------------------------------------
-#  Animasyonlu tarama calistirici
-#  $Body  : param($eps) alan, Kito fonksiyonunu cagirip sonucu donduren
-#           scriptblock. (Orn: [Kito]::TcpScan([string[]]$eps, 1500, 256) )
-#  Deadline: asla sonsuz beklemez.
+#  Animated scan runner
+#  $Body  : a scriptblock taking param($eps) that calls a Kito function
+#           and returns the result.
+#           (Example: [Kito]::TcpScan([string[]]$eps, 1500, 256) )
+#  Deadline: it never waits forever.
 # ------------------------------------------------------------------
 function Write-FixedLine {
-    # Ayni satiri HER ZAMAN ayni satirda ezerek yazar (asla alt satira tasmaz).
-    # $Row: [Console]::CursorTop degeri sabitlenir; ne olursa olsun oraya yazilir.
+    # Always overwrites the SAME line in place (never wraps to the next line).
+    # $Row: [Console]::CursorTop is pinned; the text is written there no matter what.
     param([int]$Row, [string]$Text, [ConsoleColor]$Color = [ConsoleColor]::Cyan)
     try {
         $w = [Math]::Max(20, [Console]::WindowWidth - 1)
@@ -320,7 +321,7 @@ function Write-FixedLine {
         [Console]::Write($Text)
         [Console]::ForegroundColor = $prevColor
     } catch {
-        # Konsol kontrolu yoksa (yonlendirilmis cikti vs.) sessizce dus
+        # No console control (redirected output etc.): fall back silently
         Write-Host $Text -ForegroundColor $Color
     }
 }
@@ -360,15 +361,15 @@ function Invoke-KitoStage {
             $Label, $bar, $pct, $d, $t, $spin[$i % 4], [int]$sw.Elapsed.TotalSeconds
 
         if ($redirected) {
-            # Yonlendirilmis/ log yakalanan cikti: satir spam'ini onlemek icin
-            # sadece yuzde degistiginde VE en fazla saniyede bir yaz.
+            # Redirected / captured output: to avoid line spam, write only when
+            # the percentage changes AND at most once per second.
             if ($pct -ne $lastPct) { Write-Host $line -ForegroundColor Cyan; $lastPct = $pct }
         } else {
             Write-FixedLine -Row $row -Text $line -Color Cyan
         }
 
         if ($HardCapSec -gt 0 -and $sw.Elapsed.TotalSeconds -gt $HardCapSec) {
-            Write-KLog ("  ! {0}: guvenlik siniri ({1}s) asildi, tarama durduruldu." -f $Label, $HardCapSec) 'Yellow'
+            Write-KLog ("  ! {0}: safety cap ({1}s) exceeded, scan stopped." -f $Label, $HardCapSec) 'Yellow'
             break
         }
         $i++
@@ -380,14 +381,14 @@ function Invoke-KitoStage {
     try { $ps.Dispose() } catch {}
     try { $rs.Close(); $rs.Dispose() } catch {}
 
-    $doneLine = "  {0} [Bitti] {1}/{1}  ({2}s)" -f $Label, ([Kito]::Total), [int]$sw.Elapsed.TotalSeconds
+    $doneLine = "  {0} [Done] {1}/{1}  ({2}s)" -f $Label, ([Kito]::Total), [int]$sw.Elapsed.TotalSeconds
     if ($redirected) { Write-Host $doneLine -ForegroundColor Green }
     else { Write-FixedLine -Row $row -Text $doneLine -Color Green; Write-Host '' }
     return $out
 }
 
 # ------------------------------------------------------------------
-#  Kaliteye gore sirala: once HTTPS-OK, sonra en dusuk ms, sonra en yuksek hiz
+#  Sort by quality: HTTPS-OK first, then lowest ms, then highest speed
 # ------------------------------------------------------------------
 function Sort-ByQuality {
     param($List)

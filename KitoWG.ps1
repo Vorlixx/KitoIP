@@ -1,42 +1,42 @@
 <#
     ============================================================
-      KitoWG  -  WireGuard + Cloudflare WARP (TAMAMEN UCRETSIZ)
+      KitoWG  -  WireGuard + Cloudflare WARP (COMPLETELY FREE)
     ============================================================
-      Cloudflare WARP, WireGuard tabanli ve tamamen ucretsiz,
-      sinirsiz, HESAP GEREKTIRMEYEN bir VPN'dir. Bu modul:
+      Cloudflare WARP is a WireGuard-based VPN that is completely
+      free, unlimited, and requires NO ACCOUNT. This module:
 
-        1) WireGuard istemcisini kurar (gerekirse).
-        2) Senin icin otomatik bir WARP hesabi olusturur
-           (yerel anahtar uretimi + WARP kayit API'si).
-        3) WARP endpoint'leri arasindan RASTGELE bir ulke secer
-           ve WireGuard tunelini acar.
-        4) Cikis IP'sini ve ulkesini dogrular. Basarisiz olursa
-           otomatik geri alir (internetin kesilmez).
+        1) Installs the WireGuard client (if needed).
+        2) Creates a WARP account for you automatically
+           (local key generation + the WARP registration API).
+        3) Picks a RANDOM country from the WARP endpoints
+           and opens the WireGuard tunnel.
+        4) Verifies the exit IP and its country. On failure it
+           rolls back automatically (your internet is not cut off).
 
-      Eylemler (-Action):
-        Install   : WireGuard'i kur / dogrula
-        Register  : Ucretsiz WARP hesabi olustur
-        Up        : Tuneli ac (varsayilan) - ulke secip baglan
-        Scan      : Endpoint'leri test et, ulke eslesmesini ogren
-        Down      : Tuneli kapat, normal baglantiya don
-        Status    : Aktif tunel + cikis IP/ulke
-        Reset     : WARP hesabini sil ve bastan basla
+      Actions (-Action):
+        Install   : Install / verify WireGuard
+        Register  : Create a free WARP account
+        Up        : Open the tunnel (default) - pick a country and connect
+        Scan      : Test endpoints, learn the country mapping
+        Down      : Close the tunnel, back to the normal connection
+        Status    : Active tunnel + exit IP/country
+        Reset     : Delete the WARP account and start over
 
-      Ulke:  -Country Random  (kendi ulken disinda rastgele)
-             -Country ALL     (herhangi)
-             -Country DE,NL   (belirli ulkeler)
+      Country: -Country Random  (random, outside your own country)
+               -Country ALL     (any)
+               -Country DE,NL   (specific countries)
 
-      Ornek:
+      Examples:
         KitoWG.ps1 -Action Up -Country Random
         KitoWG.ps1 -Action Up -Country DE,NL -Attempts 8
         KitoWG.ps1 -Action Scan -MaxScan 15
         KitoWG.ps1 -Action Down
 
-      NOT: WARP cikis ulkesi, baglandigin endpoint'e ve bulundugun
-      konuma gore belirlenir; ulke secimi "en iyi caba" esaslidir.
-      Endpoint -> ulke eslesmesi kullandikca ogrenilir ve onbellege
-      alinir. Kesin ulke garantisi icin kendi .conf dosyalarini
-      (ProtonVPN Free / Windscribe Free) wgconf klasoruna koyabilirsin.
+      NOTE: The WARP exit country depends on the endpoint you connect
+      to and on your location; country selection is "best effort".
+      The endpoint -> country mapping is learned as you use it and is
+      cached. For an exact country, you can drop your own .conf files
+      (ProtonVPN Free / Windscribe Free) into the wgconf folder.
     ============================================================
 #>
 
@@ -46,14 +46,14 @@ param(
     [string]$Action = 'Up',
 
     [string]$Country    = 'Random',        # Random | ALL | DE,NL,US
-    [int]   $Attempts   = 5,               # Ulke tutmazsa denenecek endpoint sayisi
-    [int]   $MaxScan    = 12,              # Scan modunda test edilecek endpoint
-    [string]$Interface  = 'KitoWG',        # Tunel (adaptor) adi
-    [string]$Endpoint,                     # Belirli endpoint: ip:port
-    [string]$Profile,                      # Kendi .conf dosyan
-    [string]$ProfileDir,                   # Ulke-bazli .conf klasoru
-    [switch]$FetchEndpoints,                # Calisan endpoint listesini indir
-    [switch]$Strict,                       # Ulke tutmazsa bastan deneme yapma
+    [int]   $Attempts   = 5,               # Number of endpoints to try if the country does not match
+    [int]   $MaxScan    = 12,              # Endpoints to test in Scan mode
+    [string]$Interface  = 'KitoWG',        # Tunnel (adapter) name
+    [string]$Endpoint,                     # Specific endpoint: ip:port
+    [string]$Profile,                      # Your own .conf file
+    [string]$ProfileDir,                   # Country-based .conf folder
+    [switch]$FetchEndpoints,                # Download a list of working endpoints
+    [switch]$Strict,                       # Do not retry from scratch if the country does not match
     [switch]$DryRun,
     [switch]$NoElevate
 )
@@ -73,7 +73,7 @@ $ConfDir    = Join-Path $ScriptDir 'wgconf'
 $TunnelName = $Interface
 
 # ------------------------------------------------------------------
-#  Loglama
+#  Logging
 # ------------------------------------------------------------------
 function Write-Log {
     param([string]$Msg, [string]$Color = 'Gray')
@@ -89,7 +89,7 @@ function Test-Admin {
 }
 
 # ------------------------------------------------------------------
-#  Cikis IP / ulke sorgusu (tunel uzerinden gider)
+#  Exit IP / country lookup (goes through the tunnel)
 # ------------------------------------------------------------------
 function Get-PublicGeo {
     param([int]$Timeout = 10)
@@ -119,7 +119,7 @@ function Test-Internet {
 }
 
 # ------------------------------------------------------------------
-#  Onbellek (endpoint -> ulke) yonetimi
+#  Cache (endpoint -> country) management
 # ------------------------------------------------------------------
 function Get-Cache {
     if (Test-Path $CacheFile) {
@@ -135,14 +135,14 @@ function Add-Cache {
 }
 
 # ------------------------------------------------------------------
-#  Aday endpoint listesi
+#  Candidate endpoint list
 # ------------------------------------------------------------------
 function Get-EndpointCandidates {
     param([switch]$Fetch)
 
     $list = New-Object 'System.Collections.Generic.List[string]'
 
-    # Bilinen WARP araliklarindan derlenmis, calistigi raporlanan endpoint'ler
+    # Endpoints compiled from known WARP ranges that are reported to work
     $curated = @(
         '162.159.192.1:2408','162.159.192.1:500','162.159.193.1:2408','162.159.195.1:2408',
         '162.159.192.11:854','162.159.192.20:854','162.159.192.24:854','162.159.192.49:854',
@@ -169,7 +169,7 @@ function Get-EndpointCandidates {
                 $resp = Invoke-WebRequest -Uri $u -UseBasicParsing -TimeoutSec 25 -Headers @{ 'User-Agent'='Mozilla/5.0' }
                 $m = [regex]::Matches($resp.Content, '\b\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}\b')
                 foreach ($x in $m) { $list.Add($x.Value) }
-            } catch { Write-Log ("Endpoint kaynagi alinamadi: {0}" -f $u) 'DarkGray' }
+            } catch { Write-Log ("Endpoint source could not be fetched: {0}" -f $u) 'DarkGray' }
         }
     }
 
@@ -177,14 +177,14 @@ function Get-EndpointCandidates {
 }
 
 # ------------------------------------------------------------------
-#  WireGuard varligi / kurulumu
+#  WireGuard presence / installation
 # ------------------------------------------------------------------
 function Test-WireGuard {
     (Test-Path $WgExe) -and (Test-Path $WgTool)
 }
 
 function Install-WireGuard {
-    Write-Log 'WireGuard istemcisi kuruluyor (winget)...' 'Yellow'
+    Write-Log 'Installing the WireGuard client (winget)...' 'Yellow'
     $ok = $false
     try {
         & winget install --id WireGuard.WireGuard -e `
@@ -194,37 +194,37 @@ function Install-WireGuard {
     } catch { }
 
     if (-not $ok) {
-        Write-Log 'winget basarisiz, resmi MSI indiriliyor...' 'Yellow'
+        Write-Log 'winget failed, downloading the official MSI...' 'Yellow'
         $msi = Join-Path $env:TEMP 'wireguard-installer.exe'
         try {
             Invoke-WebRequest -Uri 'https://download.wireguard.com/windows-client/wireguard-installer.exe' `
                 -OutFile $msi -UseBasicParsing -TimeoutSec 180
             Start-Process -FilePath $msi -ArgumentList '/quiet' -Wait
             $ok = Test-WireGuard
-        } catch { Write-Log ("Indirme/kurulum hatasi: {0}" -f $_.Exception.Message) 'Red' }
+        } catch { Write-Log ("Download/install error: {0}" -f $_.Exception.Message) 'Red' }
     }
 
-    if ($ok) { Write-Log 'WireGuard kuruldu.' 'Green' }
-    else     { Write-Log 'HATA: WireGuard kurulamadi. Elle kurun: https://www.wireguard.com/install/' 'Red' }
+    if ($ok) { Write-Log 'WireGuard installed.' 'Green' }
+    else     { Write-Log 'ERROR: WireGuard could not be installed. Install it manually: https://www.wireguard.com/install/' 'Red' }
     return $ok
 }
 
 # ------------------------------------------------------------------
-#  WARP hesabi
+#  WARP account
 # ------------------------------------------------------------------
 function New-WarpAccount {
     if (-not (Test-WireGuard)) {
         if (-not (Install-WireGuard)) { return $null }
     }
 
-    Write-Log 'Yerel WireGuard anahtar cifti uretiliyor...' 'Yellow'
+    Write-Log 'Generating a local WireGuard key pair...' 'Yellow'
     $priv = (& $WgTool genkey 2>$null) -join ''
     $priv = $priv.Trim()
-    if (-not $priv) { Write-Log 'HATA: Anahtar uretilemedi.' 'Red'; return $null }
+    if (-not $priv) { Write-Log 'ERROR: Key could not be generated.' 'Red'; return $null }
     $pub  = (($priv | & $WgTool pubkey 2>$null) -join '').Trim()
-    if (-not $pub)  { Write-Log 'HATA: Public key uretilemedi.' 'Red'; return $null }
+    if (-not $pub)  { Write-Log 'ERROR: Public key could not be generated.' 'Red'; return $null }
 
-    Write-Log 'Cloudflare WARP API sine kayit oluyor (ucretsiz, hesapsiz)...' 'Yellow'
+    Write-Log 'Registering with the Cloudflare WARP API (free, no account)...' 'Yellow'
     $tos = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     $payload = @{
         key          = $pub
@@ -240,7 +240,7 @@ function New-WarpAccount {
             -ContentType 'application/json' -Body $payload -TimeoutSec 30 `
             -Headers @{ 'User-Agent'='okhttp/3.12.1'; 'CF-Client-Version'='a-6.10-2158' }
     } catch {
-        Write-Log ("WARP kayit hatasi: {0}" -f $_.Exception.Message) 'Red'
+        Write-Log ("WARP registration error: {0}" -f $_.Exception.Message) 'Red'
         return $null
     }
 
@@ -255,7 +255,7 @@ function New-WarpAccount {
         created       = (Get-Date).ToString('s')
     }
     ($acc | ConvertTo-Json) | Set-Content -Path $AccountFile
-    Write-Log ("WARP hesabi hazir. Tip: {0}, arayuz: {1}" -f $acc.account_type, $acc.address_v4) 'Green'
+    Write-Log ("WARP account ready. Type: {0}, interface: {1}" -f $acc.account_type, $acc.address_v4) 'Green'
     return $acc
 }
 
@@ -267,7 +267,7 @@ function Get-WarpAccount {
 }
 
 # ------------------------------------------------------------------
-#  .conf olustur
+#  Build the .conf
 # ------------------------------------------------------------------
 function New-WarpConf {
     param($Account, [string]$EndpointAddr, [string]$Path)
@@ -290,18 +290,18 @@ PersistentKeepalive = 25
 }
 
 # ------------------------------------------------------------------
-#  Tunel ac / kapat
+#  Open / close the tunnel
 # ------------------------------------------------------------------
 function Stop-Tunnel {
     param([string]$Name = $TunnelName)
     $svc = "WireGuardTunnel`$$Name"
     $exists = Get-Service -Name $svc -ErrorAction SilentlyContinue
     if ($exists) {
-        Write-Log ("Tunel kapatiliyor: {0}" -f $Name) 'Yellow'
+        Write-Log ("Closing tunnel: {0}" -f $Name) 'Yellow'
         & $WgExe /uninstalltunnelservice $Name 2>&1 | Out-Null
         Start-Sleep -Seconds 2
     } else {
-        # servis yoksa yine de cagir (kalinti olabilir)
+        # call it anyway even if the service is absent (there may be leftovers)
         & $WgExe /uninstalltunnelservice $Name 2>&1 | Out-Null
     }
 }
@@ -309,7 +309,7 @@ function Stop-Tunnel {
 function Start-Tunnel {
     param([string]$ConfPath, [string]$Name = $TunnelName)
     Stop-Tunnel -Name $Name
-    Write-Log ("Tunel aciliyor: {0}" -f $Name) 'Yellow'
+    Write-Log ("Opening tunnel: {0}" -f $Name) 'Yellow'
     & $WgExe /installtunnelservice $ConfPath 2>&1 | Out-Null
     Start-Sleep -Seconds 4
     $svc = Get-Service -Name "WireGuardTunnel`$$Name" -ErrorAction SilentlyContinue
@@ -317,10 +317,10 @@ function Start-Tunnel {
 }
 
 # ------------------------------------------------------------------
-#  Yonetici yetkisi
+#  Administrator rights
 # ------------------------------------------------------------------
 if (-not (Test-Admin) -and -not $NoElevate -and $Action -ne 'Status') {
-    Write-Host 'Yonetici yetkisi gerekli. UAC penceresi aciliyor...' -ForegroundColor Yellow
+    Write-Host 'Administrator rights required. Opening the UAC prompt...' -ForegroundColor Yellow
     $argList = @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$($MyInvocation.MyCommand.Path)`"",
                  '-Action',$Action,'-Country',"`"$Country`"",'-Attempts',$Attempts,'-MaxScan',$MaxScan,
                  '-Interface',"`"$Interface`"",'-NoElevate')
@@ -331,19 +331,19 @@ if (-not (Test-Admin) -and -not $NoElevate -and $Action -ne 'Status') {
     if ($Strict)    { $argList += '-Strict' }
     if ($FetchEndpoints) { $argList += '-FetchEndpoints' }
     try { Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $argList }
-    catch { Write-Host 'Yukseltme iptal edildi.' -ForegroundColor Red }
+    catch { Write-Host 'Elevation cancelled.' -ForegroundColor Red }
     return
 }
 
 # ------------------------------------------------------------------
-#  Baslik
+#  Banner
 # ------------------------------------------------------------------
 Clear-Host
 Write-Host ''
 Write-Host '  ============================================' -ForegroundColor Cyan
-Write-Host '     K I T O W G  -  WireGuard / WARP  (UCRETSIZ)' -ForegroundColor Cyan
+Write-Host '     K I T O W G  -  WireGuard / WARP  (FREE)' -ForegroundColor Cyan
 Write-Host '  ============================================' -ForegroundColor Cyan
-Write-Log ("Eylem={0} Ulke={1}" -f $Action, $Country) 'White'
+Write-Log ("Action={0} Country={1}" -f $Action, $Country) 'White'
 
 # ------------------------------------------------------------------
 #  STATUS
@@ -351,13 +351,13 @@ Write-Log ("Eylem={0} Ulke={1}" -f $Action, $Country) 'White'
 if ($Action -eq 'Status') {
     $svc = Get-Service -Name "WireGuardTunnel`$$TunnelName" -ErrorAction SilentlyContinue
     $adapters = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "$TunnelName*" }
-    Write-Host ("    Tunel servisi : {0}" -f $(if ($svc) { $svc.Status } else { 'YOK' }))
-    Write-Host ("    Adaptor       : {0}" -f $(if ($adapters) { ($adapters.Name -join ', ') } else { '-' }))
+    Write-Host ("    Tunnel service: {0}" -f $(if ($svc) { $svc.Status } else { 'NONE' }))
+    Write-Host ("    Adapter       : {0}" -f $(if ($adapters) { ($adapters.Name -join ', ') } else { '-' }))
     $g = Get-PublicGeo
-    if ($g) { Write-Host ("    Cikis IP      : {0}  ({1} / {2})" -f $g.IP, $g.Country, $g.CC) -ForegroundColor Green }
-    else    { Write-Host '    Cikis IP      : alinamadi' -ForegroundColor Yellow }
+    if ($g) { Write-Host ("    Exit IP       : {0}  ({1} / {2})" -f $g.IP, $g.Country, $g.CC) -ForegroundColor Green }
+    else    { Write-Host '    Exit IP       : unavailable' -ForegroundColor Yellow }
     $acc = if (Test-Path $AccountFile) { Get-Content $AccountFile -Raw | ConvertFrom-Json } else { $null }
-    if ($acc) { Write-Host ("    WARP hesabi   : {0} ({1})" -f $acc.account_type, $acc.device_id) }
+    if ($acc) { Write-Host ("    WARP account  : {0} ({1})" -f $acc.account_type, $acc.device_id) }
     Write-Host ''
     return
 }
@@ -369,8 +369,8 @@ if ($Action -eq 'Down') {
     Stop-Tunnel
     Start-Sleep -Seconds 2
     $g = Get-PublicGeo
-    Write-Log 'Tunel kapatildi. Normal baglantiya donuldu.' 'Green'
-    if ($g) { Write-Log ("Cikis IP: {0}  ({1})" -f $g.IP, $g.Country) 'Green' }
+    Write-Log 'Tunnel closed. Back to the normal connection.' 'Green'
+    if ($g) { Write-Log ("Exit IP: {0}  ({1})" -f $g.IP, $g.Country) 'Green' }
     Write-Host ''
     return
 }
@@ -381,7 +381,7 @@ if ($Action -eq 'Down') {
 if ($Action -eq 'Reset') {
     Stop-Tunnel
     Remove-Item $AccountFile -ErrorAction SilentlyContinue
-    Write-Log 'WARP hesabi silindi. Bir sonraki Up ile yeni hesap olusturulacak.' 'Green'
+    Write-Log 'WARP account deleted. A new account will be created on the next Up.' 'Green'
     Write-Host ''
     return
 }
@@ -390,31 +390,31 @@ if ($Action -eq 'Reset') {
 #  INSTALL
 # ------------------------------------------------------------------
 if ($Action -eq 'Install') {
-    if (Test-WireGuard) { Write-Log 'WireGuard zaten kurulu.' 'Green' }
+    if (Test-WireGuard) { Write-Log 'WireGuard is already installed.' 'Green' }
     else { [void](Install-WireGuard) }
     Write-Host ''
     return
 }
 
 # ------------------------------------------------------------------
-#  Mevcut durum (ulke filtresi icin referans)
+#  Current state (reference for the country filter)
 # ------------------------------------------------------------------
 $own = Get-PublicGeo
 $ownCC = if ($own) { $own.CC } else { $null }
-if ($own) { Write-Log ("Mevcut cikis IP: {0} ({1})" -f $own.IP, $own.Country) 'Gray' }
+if ($own) { Write-Log ("Current exit IP: {0} ({1})" -f $own.IP, $own.Country) 'Gray' }
 
 # ------------------------------------------------------------------
 #  REGISTER
 # ------------------------------------------------------------------
 if ($Action -eq 'Register') {
     $acc = New-WarpAccount
-    if ($acc) { Write-Log 'WARP hesabi olusturuldu.' 'Green' } else { Write-Log 'Kayit basarisiz.' 'Red' }
+    if ($acc) { Write-Log 'WARP account created.' 'Green' } else { Write-Log 'Registration failed.' 'Red' }
     Write-Host ''
     return
 }
 
 # ------------------------------------------------------------------
-#  Kendi profil klasoru (opsiyonel, kesin ulke secimi)
+#  Your own profile folder (optional, exact country selection)
 # ------------------------------------------------------------------
 function Get-ProfilesByCountry {
     param([string]$Dir, [string]$Filter)
@@ -422,7 +422,7 @@ function Get-ProfilesByCountry {
     $files = Get-ChildItem -Path $Dir -Filter *.conf -File
     $out = @()
     foreach ($f in $files) {
-        # Dosya adi ilk 2 harften ulke kodu cikarilir: DE_frankfurt.conf
+        # The country code is taken from the first 2 characters of the filename: DE_frankfurt.conf
         $cc = ($f.BaseName -split '[_\-\.]')[0].ToUpper()
         $out += [pscustomobject]@{ File=$f.FullName; CC=$cc }
     }
@@ -436,13 +436,13 @@ function Get-ProfilesByCountry {
 
 function Connect-Profile {
     param([string]$Path, [string]$Label)
-    Write-Log ("Profil kullaniliyor: {0}" -f $Path) 'Yellow'
-    # Kendi config'ini oldugu gibi kullan; tunel adini degistirmek icin kopyala
+    Write-Log ("Using profile: {0}" -f $Path) 'Yellow'
+    # Use your own config as-is; copy it to change the tunnel name
     $target = Join-Path $ConfDir "$TunnelName.conf"
     New-Item -ItemType Directory -Force -Path $ConfDir | Out-Null
     Copy-Item $Path $target -Force
     if (-not (Start-Tunnel -ConfPath $target)) {
-        Write-Log 'Tunel baslatilamadi.' 'Red'
+        Write-Log 'Tunnel could not be started.' 'Red'
         return $null
     }
     $g = Test-Internet
@@ -455,10 +455,10 @@ function Connect-Profile {
 $confPath = Join-Path $ConfDir "$TunnelName.conf"
 New-Item -ItemType Directory -Force -Path $ConfDir | Out-Null
 
-# 1) Kullanici profili verilmisse
+# 1) If a user profile was provided
 if ($Profile) {
-    $g = Connect-Profile -Path $Profile -Label 'profil'
-    if ($g) { Write-Log ("Baglandi: {0} ({1})" -f $g.IP, $g.Country) 'Green' } else { Write-Log 'Baglanti kurulamadi.' 'Red' }
+    $g = Connect-Profile -Path $Profile -Label 'profile'
+    if ($g) { Write-Log ("Connected: {0} ({1})" -f $g.IP, $g.Country) 'Green' } else { Write-Log 'Could not establish a connection.' 'Red' }
     Write-Host ''
     return
 }
@@ -466,26 +466,26 @@ if ($ProfileDir) {
     $p = Get-ProfilesByCountry -Dir $ProfileDir -Filter $Country | Get-Random
     if ($p) {
         $g = Connect-Profile -Path $p.File
-        if ($g) { Write-Log ("Baglandi: {0} ({1}) - {2}" -f $g.IP, $g.Country, $p.CC) 'Green' }
+        if ($g) { Write-Log ("Connected: {0} ({1}) - {2}" -f $g.IP, $g.Country, $p.CC) 'Green' }
     } else {
-        Write-Log 'Profil klasorunde uygun .conf bulunamadi.' 'Red'
+        Write-Log 'No suitable .conf found in the profile folder.' 'Red'
     }
     Write-Host ''
     return
 }
 
-# 2) WARP hesabi
+# 2) WARP account
 $acc = Get-WarpAccount
-if (-not $acc) { Write-Log 'WARP hesabi alinamadi, islem durduruldu.' 'Red'; Write-Host ''; return }
+if (-not $acc) { Write-Log 'Could not obtain a WARP account, operation stopped.' 'Red'; Write-Host ''; return }
 
-# 3) Endpoint secimi
+# 3) Endpoint selection
 $candidates = @()
 if ($Endpoint) { $candidates = @($Endpoint) }
 else {
     $all = Get-EndpointCandidates -Fetch:$FetchEndpoints
     $cache = Get-Cache
 
-    # Ulke filtresine uyan onbellek kayitlari
+    # Cache records matching the country filter
     $wantAll = ($Country.Trim().ToUpper() -eq 'ALL')
     $cachedOk = @()
     if ($cache.Count -gt 0) {
@@ -501,9 +501,9 @@ else {
 
     if ($cachedOk.Count -gt 0) {
         $candidates = @($cachedOk | Sort-Object { Get-Random } | ForEach-Object { $_.endpoint })
-        Write-Log ("Onbellekten {0} uygun endpoint bulundu." -f $candidates.Count) 'Gray'
+        Write-Log ("Found {0} suitable endpoints in the cache." -f $candidates.Count) 'Gray'
     }
-    # Onbellek bos/uygun degilse tum adaylardan rastgele
+    # If the cache is empty/unsuitable, pick randomly from all candidates
     if ($candidates.Count -eq 0) {
         $candidates = @($all | Sort-Object { Get-Random })
     }
@@ -512,7 +512,7 @@ else {
 $maxTry = if ($Action -eq 'Scan') { $MaxScan } else { $Attempts }
 $maxTry = [Math]::Max(1, $maxTry)
 
-Write-Log ("{0} endpoint denenecek (filtre: {1})..." -f $maxTry, $Country) 'Yellow'
+Write-Log ("{0} endpoints will be tried (filter: {1})..." -f $maxTry, $Country) 'Yellow'
 
 $chosen = $null
 $chosenGeo = $null
@@ -523,30 +523,30 @@ $lastWorkingGeo = $null
 foreach ($ep in $candidates) {
     if ($tried -ge $maxTry) { break }
     $tried++
-    Write-Log ("[{0}/{1}] Deneniyor: {2}" -f $tried, $maxTry, $ep) 'Gray'
+    Write-Log ("[{0}/{1}] Trying: {2}" -f $tried, $maxTry, $ep) 'Gray'
 
     if ($DryRun) {
-        Write-Log 'DryRun: tunel acilmadi.' 'Yellow'
+        Write-Log 'DryRun: tunnel not opened.' 'Yellow'
         continue
     }
 
     New-WarpConf -Account $acc -EndpointAddr $ep -Path $confPath
     $up = Start-Tunnel -ConfPath $confPath
-    if (-not $up) { Write-Log '  tunel servisi baslamadi.' 'DarkGray'; continue }
+    if (-not $up) { Write-Log '  the tunnel service did not start.' 'DarkGray'; continue }
 
     $geo = Test-Internet -Retries 2 -Sleep 3
     if (-not $geo) {
-        Write-Log '  baglanti dogrulanamadi, geri aliniyor.' 'DarkGray'
+        Write-Log '  connection could not be verified, rolling back.' 'DarkGray'
         Stop-Tunnel
         continue
     }
 
-    Write-Log ("  cikis: {0} ({1}) - {2}" -f $geo.IP, $geo.Country, $geo.CC) 'Gray'
+    Write-Log ("  exit: {0} ({1}) - {2}" -f $geo.IP, $geo.Country, $geo.CC) 'Gray'
     Add-Cache -Ep $ep -Ip $geo.IP -CC $geo.CC -CountryName $geo.Country -City $geo.City
 
     if (-not $lastWorking) { $lastWorking = $ep; $lastWorkingGeo = $geo }
 
-    # Filtre kontrolu
+    # Filter check
     $match = $false
     switch ($Country.Trim().ToUpper()) {
         'ALL'    { $match = $true }
@@ -559,51 +559,51 @@ foreach ($ep in $candidates) {
 
     if ($match) {
         $chosen = $ep; $chosenGeo = $geo
-        Write-Log ("  ULKE TUTTU: {0}" -f $geo.Country) 'Green'
+        Write-Log ("  COUNTRY MATCHED: {0}" -f $geo.Country) 'Green'
         break
     } else {
-        Write-Log ("  ulke uygun degil ({0}), sonraki endpoint..." -f $geo.CC) 'DarkGray'
+        Write-Log ("  country not suitable ({0}), next endpoint..." -f $geo.CC) 'DarkGray'
         if (-not $Strict) { Stop-Tunnel }
     }
     if ($Action -eq 'Scan') { Stop-Tunnel }
 }
 
 # ------------------------------------------------------------------
-#  Sonuc
+#  Result
 # ------------------------------------------------------------------
 Write-Host ''
 if ($chosen) {
-    Write-Host '  ---------------- SONUC ----------------' -ForegroundColor Cyan
-    Write-Host ("    ONCE  : {0}" -f $(if ($own) { "$($own.IP) ($($own.Country))" } else { '-' })) -ForegroundColor White
-    Write-Host ("    SONRA : {0}  ({1} / {2})" -f $chosenGeo.IP, $chosenGeo.Country, $chosenGeo.CC) -ForegroundColor Green
+    Write-Host '  ---------------- RESULT ----------------' -ForegroundColor Cyan
+    Write-Host ("    BEFORE: {0}" -f $(if ($own) { "$($own.IP) ($($own.Country))" } else { '-' })) -ForegroundColor White
+    Write-Host ("    AFTER : {0}  ({1} / {2})" -f $chosenGeo.IP, $chosenGeo.Country, $chosenGeo.CC) -ForegroundColor Green
     Write-Host ("    Endpoint: {0}" -f $chosen) -ForegroundColor White
     Write-Host '  --------------------------------------' -ForegroundColor Cyan
-    Write-Log 'Tunel aktif (KitoWG). Kapatmak icin: KitoWG.ps1 -Action Down' 'Green'
+    Write-Log 'Tunnel active (KitoWG). To close: KitoWG.ps1 -Action Down' 'Green'
 }
 elseif ($lastWorking) {
     if ($Strict) {
-        Write-Log ("Ulke filtresi tutmadi. Son calisan endpoint: {0} (Strict: tunel kapatildi)." -f $lastWorking) 'Yellow'
+        Write-Log ("Country filter did not match. Last working endpoint: {0} (Strict: tunnel closed)." -f $lastWorking) 'Yellow'
     } else {
-        Write-Log ("Ulke tam tutmadi; son calisan endpoint tekrar aciliyor: {0}" -f $lastWorking) 'Yellow'
+        Write-Log ("Country did not fully match; reopening the last working endpoint: {0}" -f $lastWorking) 'Yellow'
         New-WarpConf -Account $acc -EndpointAddr $lastWorking -Path $confPath
         $reUp = Start-Tunnel -ConfPath $confPath
         $reGeo = $null
         if ($reUp) { $reGeo = Test-Internet -Retries 3 -Sleep 3 }
         if ($reGeo) {
-            Write-Host '  ---------------- SONUC ----------------' -ForegroundColor Cyan
-            Write-Host ("    ONCE  : {0}" -f $(if ($own) { "$($own.IP) ($($own.Country))" } else { '-' })) -ForegroundColor White
-            Write-Host ("    SONRA : {0}  ({1} / {2})" -f $reGeo.IP, $reGeo.Country, $reGeo.CC) -ForegroundColor Yellow
+            Write-Host '  ---------------- RESULT ----------------' -ForegroundColor Cyan
+            Write-Host ("    BEFORE: {0}" -f $(if ($own) { "$($own.IP) ($($own.Country))" } else { '-' })) -ForegroundColor White
+            Write-Host ("    AFTER : {0}  ({1} / {2})" -f $reGeo.IP, $reGeo.Country, $reGeo.CC) -ForegroundColor Yellow
             Write-Host ("    Endpoint: {0}" -f $lastWorking) -ForegroundColor White
             Write-Host '  --------------------------------------' -ForegroundColor Cyan
-            Write-Log 'Tunel aktif (ulke filtresi tam tutmadi). Kapatmak icin: KitoWG.ps1 -Action Down' 'Yellow'
+            Write-Log 'Tunnel active (country filter did not fully match). To close: KitoWG.ps1 -Action Down' 'Yellow'
         } else {
             Stop-Tunnel
-            Write-Log 'Son calisan endpoint tekrar acilamadi; tunel kapatildi.' 'Red'
+            Write-Log 'The last working endpoint could not be reopened; tunnel closed.' 'Red'
         }
     }
 }
 else {
-    Write-Log 'Hicbir endpoint ile baglanti kurulamadi.' 'Red'
+    Write-Log 'Could not connect with any endpoint.' 'Red'
     Stop-Tunnel
 }
 Write-Host ''

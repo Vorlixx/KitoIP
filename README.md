@@ -58,7 +58,7 @@ It gives you three independent capabilities from the same window:
 ## 📦 Installation
 
 ```bat
-git clone https://github.com/<your-user>/KitoIP.git
+git clone https://github.com/Vorlixx/KitoIP.git
 cd KitoIP
 ```
 

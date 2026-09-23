@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KitoAi — AI Pentest Assistant</title>
+<style>
+  :root { --bg:#0b0e14; --panel:#11151f; --fg:#c9d1d9; --dim:#6e7681; --green:#3fb950; --red:#f85149; --yellow:#d29922; --cyan:#39c5cf; --accent:#58a6ff; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--fg); font:14px/1.55 "Cascadia Code","Consolas",monospace; height:100vh; display:flex; flex-direction:column; }
+  header { padding:10px 16px; border-bottom:1px solid #1f2630; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  header h1 { font-size:15px; color:var(--accent); font-weight:600; }
+  header .pill { font-size:11px; padding:2px 8px; border-radius:10px; background:#1f2630; color:var(--dim); }
+  header .pill.on { color:var(--green); }
+  header .pill.off { color:var(--yellow); }
+  #output { flex:1; overflow-y:auto; padding:14px 16px; white-space:pre-wrap; word-break:break-word; }
+  #output .cmd { color:var(--cyan); }
+  #output .ok { color:var(--green); }
+  #output .warn { color:var(--yellow); }
+  #output .err { color:var(--red); }
+  #output .dim { color:var(--dim); }
+  footer { border-top:1px solid #1f2630; display:flex; align-items:center; padding:8px 12px; gap:8px; }
+  #prompt { color:var(--green); white-space:nowrap; }
+  input { flex:1; background:transparent; border:0; outline:0; color:var(--fg); font:inherit; }
+  input::placeholder { color:var(--dim); }
+  button { background:#1f2630; color:var(--fg); border:1px solid #2d333b; border-radius:6px; padding:6px 12px; cursor:pointer; font:inherit; font-size:12px; }
+  button:hover { border-color:var(--accent); color:var(--accent); }
+  .sugg { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-left:auto; }
+  .sugg span { font-size:11px; color:var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>KitoAi</h1>
+  <span class="pill" id="llmPill">llm: checking…</span>
+  <span class="pill" id="exploitPill">exploit: …</span>
+  <div class="sugg">
+    <span>try:</span><span>target example.com</span> · <span>run example.com</span> · <span>findings example.com</span> · <span>report example.com</span>
+  </div>
+</header>
+<div id="output"></div>
+<footer>
+  <span id="prompt">kitoai&gt;</span>
+  <input id="inp" autocomplete="off" spellcheck="false" placeholder="type a command…">
+  <button id="send">send</button>
+</footer>
+<script>
+const out = document.getElementById('output');
+const inp = document.getElementById('inp');
+const send = document.getElementById('send');
+let polling = null;
+
+function print(text, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = text;
+  out.appendChild(line);
+  out.scrollTop = out.scrollHeight;
+}
+
+function printCmd(cmd) { print('kitoai> ' + cmd, 'cmd'); }
+
+function classify(text) {
+  if (/finding|\[critical\]|\[high\]|vulnerab|\[!\]|failed/i.test(text)) return 'warn';
+  if (/error|timed out|unknown command/i.test(text)) return 'err';
+  if (/\[task complete\]|report written|\[ok\]|\[\+\]/i.test(text)) return 'ok';
+  return 'dim';
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || res.statusText);
+  return data;
+}
+
+async function refreshStatus() {
+  try {
+    const s = await api('/api/status');
+    document.getElementById('llmPill').textContent = 'llm: ' + (s.llm.available ? 'online' : 'offline (fallback)');
+    document.getElementById('llmPill').className = 'pill ' + (s.llm.available ? 'on' : 'off');
+    document.getElementById('exploitPill').textContent = 'exploit: ' + (s.settings.exploit ? 'enabled' : 'disabled');
+    document.getElementById('exploitPill').className = 'pill ' + (s.settings.exploit ? 'on' : 'off');
+  } catch (e) { document.getElementById('llmPill').textContent = 'llm: offline'; }
+}
+
+async function pollTask(id) {
+  if (polling) clearInterval(polling);
+  polling = setInterval(async () => {
+    try {
+      const t = await api('/api/task/' + id);
+      if (t.done) { clearInterval(polling); polling = null; }
+      print(t.output, 'dim');
+      if (t.done) print('[task complete]', 'ok');
+    } catch (e) { clearInterval(polling); polling = null; }
+  }, 1200);
+}
+
+async function handle(msg) {
+  if (!msg.trim()) return;
+  printCmd(msg.trim());
+  const parts = msg.trim().split(/\s+/);
+  const cmd = parts[0].toLowerCase();
+  const arg = parts.slice(1).join(' ');
+  try {
+    if ((cmd === 'run' || cmd === 'probe') && arg) {
+      const r = await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message: msg.trim()})});
+      print(r.message, 'ok');
+      if (r.task) pollTask(r.task);
+    } else {
+      const r = await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message: msg.trim()})});
+      print(r.message, classify(r.message));
+    }
+  } catch (e) { print('error: ' + e.message, 'err'); }
+}
+
+send.onclick = () => { handle(inp.value); inp.value = ''; };
+inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { handle(inp.value); inp.value = ''; } });
+print('KitoAi — AI penetration testing assistant', 'ok');
+print('Authorized testing only. Type: target <domain>, run <domain>, findings <domain>, report <domain>, status, help', 'dim');
+refreshStatus();
+</script>
+</body>
+</html>

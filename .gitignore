@@ -1,0 +1,26 @@
+# Python bytecode / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets and environment files
+.env
+.env.*
+*.key
+*.pem
+
+# KitoAi runtime data (sessions, findings, generated reports)
+data/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

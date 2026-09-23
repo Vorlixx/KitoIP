@@ -1,0 +1,3 @@
+# Web dashboard only; the core (CLI/agents) is stdlib-only.
+fastapi>=0.110
+uvicorn>=0.29

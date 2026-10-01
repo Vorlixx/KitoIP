@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# KitoAi security tools installer (Kali/Debian/Ubuntu or Windows Git-Bash).
+# KitoIP security tools installer (Kali/Debian/Ubuntu or Windows Git-Bash).
 set -euo pipefail
 
 TOOLS=(nmap subfinder httpx nuclei katana ffuf sqlmap nikto)

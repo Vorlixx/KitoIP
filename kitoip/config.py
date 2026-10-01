@@ -1,4 +1,4 @@
-"""KitoAi configuration: environment, LLM settings, session state."""
+"""KitoIP configuration: environment, LLM settings, session state."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-APP_NAME = "KitoAi"
+APP_NAME = "KitoIP"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.environ.get("KITOAI_DATA_DIR", PROJECT_ROOT / "data"))
+DATA_DIR = Path(os.environ.get("KITOIP_DATA_DIR", PROJECT_ROOT / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -19,26 +19,26 @@ class Settings:
 
     # LLM (any OpenAI-compatible endpoint works: OpenAI, OpenRouter, Ollama, ...)
     llm_base_url: str = field(
-        default_factory=lambda: os.environ.get("KITOAI_LLM_BASE", "https://api.openai.com/v1")
+        default_factory=lambda: os.environ.get("KITOIP_LLM_BASE", "https://api.openai.com/v1")
     )
     llm_api_key: str = field(
-        default_factory=lambda: os.environ.get("KITOAI_LLM_KEY", "")
+        default_factory=lambda: os.environ.get("KITOIP_LLM_KEY", "")
     )
     llm_model: str = field(
-        default_factory=lambda: os.environ.get("KITOAI_LLM_MODEL", "gpt-4o-mini")
+        default_factory=lambda: os.environ.get("KITOIP_LLM_MODEL", "gpt-4o-mini")
     )
-    llm_timeout: int = int(os.environ.get("KITOAI_LLM_TIMEOUT", "90"))
+    llm_timeout: int = int(os.environ.get("KITOIP_LLM_TIMEOUT", "90"))
 
     # Execution safety
-    max_steps: int = int(os.environ.get("KITOAI_MAX_STEPS", "25"))
-    tool_timeout: int = int(os.environ.get("KITOAI_TOOL_TIMEOUT", "300"))
-    confirm_destructive: bool = os.environ.get("KITOAI_CONFIRM_DESTRUCTIVE", "1") == "1"
-    allow_active_exploit: bool = os.environ.get("KITOAI_ALLOW_EXPLOIT", "0") == "1"
-    max_concurrent: int = int(os.environ.get("KITOAI_MAX_CONCURRENT", "3"))
+    max_steps: int = int(os.environ.get("KITOIP_MAX_STEPS", "25"))
+    tool_timeout: int = int(os.environ.get("KITOIP_TOOL_TIMEOUT", "300"))
+    confirm_destructive: bool = os.environ.get("KITOIP_CONFIRM_DESTRUCTIVE", "1") == "1"
+    allow_active_exploit: bool = os.environ.get("KITOIP_ALLOW_EXPLOIT", "0") == "1"
+    max_concurrent: int = int(os.environ.get("KITOIP_MAX_CONCURRENT", "3"))
 
     # Web dashboard
-    web_host: str = os.environ.get("KITOAI_WEB_HOST", "127.0.0.1")
-    web_port: int = int(os.environ.get("KITOAI_WEB_PORT", "8666"))
+    web_host: str = os.environ.get("KITOIP_WEB_HOST", "127.0.0.1")
+    web_port: int = int(os.environ.get("KITOIP_WEB_PORT", "8666"))
 
     # Persistence
     findings_file: Path = DATA_DIR / "findings.json"

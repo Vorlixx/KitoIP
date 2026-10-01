@@ -16,7 +16,7 @@ env/
 *.key
 *.pem
 
-# KitoAi runtime data (sessions, findings, generated reports)
+# KitoIP runtime data (sessions, findings, generated reports)
 data/
 
 # OS / editor noise

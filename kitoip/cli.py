@@ -1,4 +1,4 @@
-"""KitoAi command-line interface: interactive REPL + headless auto-run."""
+"""KitoIP command-line interface: interactive REPL + headless auto-run."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def _show_findings(store: FindingsStore, target: str) -> None:
             print(f"      evidence: {f['evidence'][:160]}")
 
 
-def _save_report(session: Session, store: FindingsStore, target: str, program: str = "KitoAi Program") -> Path:
+def _save_report(session: Session, store: FindingsStore, target: str, program: str = "KitoIP Program") -> Path:
     report = generate_report(program_name=program, target=target, findings=store.all())
     out = DATA_DIR / f"report_{session._slug(target)}.md"
     out.write_text(report, encoding="utf-8")
@@ -78,7 +78,7 @@ def _interactive(target_arg: str | None) -> None:
     store = FindingsStore(settings.findings_file)
 
     while True:
-        prompt = f"kitoai[{target or '?'}]> " if target else "kitoai> "
+        prompt = f"kitoip[{target or '?'}]> " if target else "kitoip> "
         try:
             raw = input(_info(prompt)).strip()
         except (EOFError, KeyboardInterrupt):
@@ -126,7 +126,7 @@ def _interactive(target_arg: str | None) -> None:
             if not target:
                 print(_err("Set a target first: target <domain|url>"))
                 continue
-            print(_warn("\n[!] KitoAi will run automated checks against the declared target."))
+            print(_warn("\n[!] KitoIP will run automated checks against the declared target."))
             if settings.confirm_destructive:
                 confirm = input("Proceed? [y/N] ").strip().lower()
                 if confirm not in ("y", "yes"):
@@ -176,10 +176,10 @@ def _headless(target: str, program: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="kitoai", description=f"{__app_name__} - AI pentest assistant")
+    parser = argparse.ArgumentParser(prog="kitoip", description=f"{__app_name__} - AI pentest assistant")
     parser.add_argument("--target", help="target domain/URL to assess")
     parser.add_argument("--auto", action="store_true", help="headless: run full pipeline and write report")
-    parser.add_argument("--program", default="KitoAi Program", help="program name for the report")
+    parser.add_argument("--program", default="KitoIP Program", help="program name for the report")
     parser.add_argument("--version", action="store_true", help="print version")
     args = parser.parse_args()
 

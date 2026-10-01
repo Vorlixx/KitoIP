@@ -14,7 +14,7 @@ import urllib.request
 
 from .config import settings
 
-SYSTEM_PROMPT = """You are KitoAi, an AI penetration testing assistant inside an automated \
+SYSTEM_PROMPT = """You are KitoIP, an AI penetration testing assistant inside an automated \
 security agent. You plan and analyze security testing steps for AUTHORIZED targets only.
 
 You have tools: http_probe, http_headers, robots_scan, dns_resolve, ports_scan (nmap), \
@@ -57,7 +57,7 @@ class ChatLLM:
 
     def chat(self, messages: list[dict], temperature: float = 0.2, max_tokens: int = 1600) -> str:
         if not self.available:
-            raise LLMError("No API key configured (set KITOAI_LLM_KEY).")
+            raise LLMError("No API key configured (set KITOIP_LLM_KEY).")
         body = json.dumps(
             {
                 "model": self.model,

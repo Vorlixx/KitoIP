@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KitoAi — AI Pentest Assistant</title>
+<title>KitoIP — AI Pentest Assistant</title>
 <style>
   :root { --bg:#0b0e14; --panel:#11151f; --fg:#c9d1d9; --dim:#6e7681; --green:#3fb950; --red:#f85149; --yellow:#d29922; --cyan:#39c5cf; --accent:#58a6ff; }
   * { box-sizing:border-box; margin:0; padding:0; }
@@ -31,7 +31,7 @@
 </head>
 <body>
 <header>
-  <h1>KitoAi</h1>
+  <h1>KitoIP</h1>
   <span class="pill" id="llmPill">llm: checking…</span>
   <span class="pill" id="exploitPill">exploit: …</span>
   <div class="sugg">
@@ -40,7 +40,7 @@
 </header>
 <div id="output"></div>
 <footer>
-  <span id="prompt">kitoai&gt;</span>
+  <span id="prompt">kitoip&gt;</span>
   <input id="inp" autocomplete="off" spellcheck="false" placeholder="type a command…">
   <button id="send">send</button>
 </footer>
@@ -58,7 +58,7 @@ function print(text, cls) {
   out.scrollTop = out.scrollHeight;
 }
 
-function printCmd(cmd) { print('kitoai> ' + cmd, 'cmd'); }
+function printCmd(cmd) { print('kitoip> ' + cmd, 'cmd'); }
 
 function classify(text) {
   if (/finding|\[critical\]|\[high\]|vulnerab|\[!\]|failed/i.test(text)) return 'warn';
@@ -116,7 +116,7 @@ async function handle(msg) {
 
 send.onclick = () => { handle(inp.value); inp.value = ''; };
 inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { handle(inp.value); inp.value = ''; } });
-print('KitoAi — AI penetration testing assistant', 'ok');
+print('KitoIP — AI penetration testing assistant', 'ok');
 print('Authorized testing only. Type: target <domain>, run <domain>, findings <domain>, report <domain>, status, help', 'dim');
 refreshStatus();
 </script>

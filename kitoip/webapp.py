@@ -1,6 +1,6 @@
-"""KitoAi web dashboard: FastAPI backend with async task queue.
+"""KitoIP web dashboard: FastAPI backend with async task queue.
 
-Run:  python -m kitoai.webapp   (or: python run.py --web)
+Run:  python -m kitoip.webapp   (or: python run.py --web)
 """
 
 from __future__ import annotations
@@ -159,7 +159,7 @@ def chat(body: ChatIn) -> dict:
     if any(g in lower for g in _GREETINGS):
         return {
             "message": (
-                "Merhaba! Ben KitoAi, AI destekli güvenlik test asistanı.\n\n"
+                "Merhaba! Ben KitoIP, AI destekli güvenlik test asistanı.\n\n"
                 "Komutlar:\n"
                 "  target <alan-adı>    hedef belirle (ör. target example.com)\n"
                 "  run <alan-adı>       otomatik tarama başlat (ör. run example.com)\n"
@@ -220,7 +220,7 @@ def chat(body: ChatIn) -> dict:
 
         session = Session(arg)
         store = FindingsStore(session._dir / "findings.json")
-        report = generate_report(program_name="KitoAi Program", target=arg, findings=store.all())
+        report = generate_report(program_name="KitoIP Program", target=arg, findings=store.all())
         return {"message": report[:6000]}
     if cmd == "status":
         return {"message": f"LLM: {'online' if ChatLLM().available else 'offline (fallback)'} | exploit: {'enabled' if settings.allow_active_exploit else 'disabled'}"}

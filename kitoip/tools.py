@@ -1,4 +1,4 @@
-"""Tool adapter layer for KitoAi.
+"""Tool adapter layer for KitoIP.
 
 Two kinds of tools:
 - builtin: pure-Python probes (HTTP fetch, headers, robots.txt, DNS).
@@ -99,7 +99,7 @@ def _extract_title(body: bytes) -> str:
 
 
 def _http_fetch(url: str, timeout: int = HTTP_TIMEOUT) -> tuple[int, dict, bytes]:
-    req = urllib.request.Request(url, headers={"User-Agent": "KitoAi/0.1 (security assessment)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "KitoIP/0.1 (security assessment)"})
     ctx = ssl.create_default_context()
     ctx.check_hostname = True
     ctx.verify_mode = ssl.CERT_REQUIRED
@@ -339,7 +339,7 @@ def _sql_inject(target: str, args: dict) -> ToolResult:
             target,
             "",
             ok=False,
-            error="Active exploitation is disabled. Set KITOAI_ALLOW_EXPLOIT=1 to enable sqlmap (authorized targets only).",
+            error="Active exploitation is disabled. Set KITOIP_ALLOW_EXPLOIT=1 to enable sqlmap (authorized targets only).",
         )
     url = _normalize_url(target, args.get("path", "/"))
     if not _in_scope(url, target):

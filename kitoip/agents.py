@@ -4,7 +4,7 @@ Two planners are available:
 - LLM planner: asks the configured model to pick the next tool (JSON).
 - Fallback planner: deterministic phase-based decision engine.
 
-Both feed the same executor/analyst pipeline, so KitoAi runs with or
+Both feed the same executor/analyst pipeline, so KitoIP runs with or
 without an API key.
 """
 
@@ -235,7 +235,7 @@ def _fallback_plan(history: list[dict], installed: set[str]) -> dict | None:
 # LLM planner
 # --------------------------------------------------------------------------
 
-_PLANNER_SYSTEM = """You are the planning module of KitoAi, an automated security testing \
+_PLANNER_SYSTEM = """You are the planning module of KitoIP, an automated security testing \
 agent. Choose the single most valuable next tool call for the target, based on the step \
 history. Rules:
 - Only tools from the provided list. No others.
@@ -248,7 +248,7 @@ history. Rules:
 # LLM analyst
 # --------------------------------------------------------------------------
 
-_ANALYST_SYSTEM = """You are the analysis module of KitoAi. Convert the tool output into \
+_ANALYST_SYSTEM = """You are the analysis module of KitoIP. Convert the tool output into \
 candidate findings. Output strictly a JSON array of objects with keys: title (str), \
 severity (info|low|medium|high|critical), description (str), evidence (str), \
 remediation (str), category (str). Only include findings clearly supported by the \
@@ -366,7 +366,7 @@ class Orchestrator:
 
     def run(self, max_steps: int | None = None) -> dict:
         max_steps = max_steps or settings.max_steps
-        self.progress(f"[*] KitoAi agent started on {self.target}")
+        self.progress(f"[*] KitoIP agent started on {self.target}")
         self.progress(f"[*] LLM: {'online (' + self.llm.model + ')' if self.llm.available else 'offline (fallback planner)'}")
         for i in range(max_steps):
             decision = self._next_decision()

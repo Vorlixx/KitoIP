@@ -1,4 +1,4 @@
-"""KitoAi unified entry point.
+"""KitoIP unified entry point.
 
 Usage:
     python run.py                  -> interactive CLI
@@ -11,27 +11,27 @@ import sys
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="kitoai")
+    parser = argparse.ArgumentParser(prog="kitoip")
     parser.add_argument("--web", action="store_true", help="start the web dashboard")
     parser.add_argument("--target", help="target domain/URL")
     parser.add_argument("--auto", action="store_true", help="headless auto-pipeline")
-    parser.add_argument("--program", default="KitoAi Program")
+    parser.add_argument("--program", default="KitoIP Program")
     parser.add_argument("--version", action="store_true")
     args, _ = parser.parse_known_args()
 
     if args.version:
-        from kitoai import __version__
+        from kitoip import __version__
 
-        print(f"KitoAi {__version__}")
+        print(f"KitoIP {__version__}")
         return
 
     if args.web:
-        from kitoai.webapp import main as web_main
+        from kitoip.webapp import main as web_main
 
         web_main()
         return
 
-    from kitoai.cli import main as cli_main
+    from kitoip.cli import main as cli_main
 
     cli_main()
 

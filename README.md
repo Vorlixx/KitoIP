@@ -67,28 +67,7 @@ On Windows you can also use the one-click launcher: `kitoip.bat` (starts the das
 | `help` | Show help |
 | `exit` | Quit |
 
-### LLM backends
 
-KitoIP talks to any OpenAI-compatible endpoint. Point `KITOIP_LLM_BASE` at OpenAI, OpenRouter, Ollama, LM Studio or vLLM and set `KITOIP_LLM_KEY`. With no key configured, the deterministic rule-based planner takes over — no feature is lost.
-
-## Configuration
-
-All settings are environment variables:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `KITOIP_LLM_BASE` | `https://api.openai.com/v1` | OpenAI-compatible base URL |
-| `KITOIP_LLM_KEY` | *(empty)* | LLM API key (empty = offline rule-based planner) |
-| `KITOIP_LLM_MODEL` | `gpt-4o-mini` | Model name |
-| `KITOIP_LLM_TIMEOUT` | `90` | LLM request timeout (s) |
-| `KITOIP_MAX_STEPS` | `25` | Maximum agent steps |
-| `KITOIP_TOOL_TIMEOUT` | `300` | Per-tool timeout (s) |
-| `KITOIP_CONFIRM_DESTRUCTIVE` | `1` | Ask for confirmation before destructive steps |
-| `KITOIP_ALLOW_EXPLOIT` | `0` | Enable active exploitation (sqlmap) |
-| `KITOIP_MAX_CONCURRENT` | `3` | Max concurrent tool runs |
-| `KITOIP_WEB_HOST` | `127.0.0.1` | Dashboard bind host |
-| `KITOIP_WEB_PORT` | `8666` | Dashboard bind port |
-| `KITOIP_DATA_DIR` | `./data` | Runtime data directory (sessions, findings) |
 
 ## Project layout
 
